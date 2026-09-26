@@ -978,7 +978,7 @@ pub fn draw(state: *State, resources: *Resources, frame: Frame) (spr.Error || Al
     state.runCharges(live, frame_duration, frame.multiplayer);
     // Where the lead cursor stands, which the reticle closes on, whether the enemy lock's light
     // shows, and how the display shakes (`hud_blit`).
-    var lead: ?[2]i32 = null;
+    var lead: Cursor = .none;
     var lock_lit = false;
     const shake = state.interference.shake(frame.hit_shake, frame.random);
     if (ahead) {
@@ -1819,7 +1819,7 @@ pub const State = struct {
     }
 
     /// What `hud_draw` draws only in the view ahead from the cockpit, after the view's name.
-    fn drawInstruments(state: *State, resources: *Resources, frame: Frame, lead: ?[2]i32, colour: [4]f32, scale: f32) (spr.Error || Allocator.Error)!void {
+    fn drawInstruments(state: *State, resources: *Resources, frame: Frame, lead: Cursor, colour: [4]f32, scale: f32) (spr.Error || Allocator.Error)!void {
         const frame_duration = frame.clock.frame_duration;
         const shake = state.interference.shake(frame.hit_shake, frame.random);
         const slot = &frame.all.slots[frame.all.player];
@@ -1974,10 +1974,10 @@ pub const Sight = struct {
         return sight.place.inverse(point);
     }
 
-    /// Where a point in the camera's frame falls on the screen, rounded to a pixel.
-    pub fn pixel(sight: Sight, point: Vector) [2]i32 {
-        const at = sight.projection.project(point);
-        return .{ round(at[0]), round(at[1]) };
+    /// Where a point in the camera's frame falls on the screen, rounded to a pixel; null for one
+    /// beyond the screen's reach (`pixelOf`).
+    pub fn pixel(sight: Sight, point: Vector) ?[2]i32 {
+        return pixelOf(sight.projection.project(point));
     }
 
     /// The screen's last pixel across and down.
@@ -1999,12 +1999,25 @@ pub const Sight = struct {
     }
 };
 
+/// How far from the screen's corner, either way, a point the camera projects counts as a pixel.
+/// Beyond it, as a point just in front of the camera's plane falls, it stands nowhere near the
+/// screen: the game rounds such a point to the least `i32`, as the x87 does, and its sums with
+/// that wrap, which leaves it as far from anything on the screen.
+pub const pixel_reach: f32 = 1 << 24;
+
+/// A point on the screen rounded to a pixel; null for one beyond `pixel_reach`, or for no number.
+pub fn pixelOf(at: Point) ?[2]i32 {
+    if (!(@abs(at[0]) < pixel_reach and @abs(at[1]) < pixel_reach)) return null;
+    return .{ round(at[0]), round(at[1]) };
+}
+
 /// How near the middle of the screen, either way, an object stands for `hud_target_keys` to take
 /// it as under the reticle, in the display's own pixels.
 pub const reticle_reach: i32 = 0x20;
 
 /// The first object other than the player's ship that stands in front of the camera within
-/// `reticle_reach` of the middle of the screen, drawn `scale` times its size.
+/// `reticle_reach` of the middle of the screen, drawn `scale` times its size. One whose pixel
+/// lies beyond the screen's reach (`pixelOf`), as one just in front of the camera's plane, is not.
 pub fn underReticle(all: *const create.Objects, sight: Sight, scale: f32) ?u16 {
     const middle = sight.middle();
     const reach = pixels(reticle_reach, scale);
@@ -2012,7 +2025,7 @@ pub fn underReticle(all: *const create.Objects, sight: Sight, scale: f32) ?u16 {
         if (index == all.player or !slot.object.type.hasStats()) continue;
         const seen = sight.view(slot.drawn.position);
         if (!(seen[2] > 0)) continue;
-        const at = sight.pixel(seen);
+        const at = sight.pixel(seen) orelse continue;
         if (@abs(at[0] - middle[0]) < reach and @abs(at[1] - middle[1]) < reach) return @intCast(index);
     }
     return null;
@@ -2289,7 +2302,7 @@ test Sight {
     try std.testing.expect(!sight.onScreen(.{ -1, 5 }));
     try std.testing.expectEqual([2]i32{ 320, 240 }, sight.middle());
     // Straight ahead falls on the middle.
-    try std.testing.expectEqual(sight.middle(), sight.pixel(sight.view(.{ 0, 0, 1000 })));
+    try std.testing.expectEqual(sight.middle(), sight.pixel(sight.view(.{ 0, 0, 1000 })).?);
 }
 
 test "the display follows the player's target" {
@@ -3015,9 +3028,21 @@ pub const BlindFire = enum {
     excluded,
 };
 
-/// Draws the reticle as `hud_draw` does in view 0, for a target standing at `target_at` on the
-/// screen, if one does, and says whether blind fire aims at it, which the game keeps as the
-/// object's `blind_fire_aim`. The chase view draws neither the reticle nor the sight.
+/// Where the target's lead cursor stands for the reticle (`drawTarget`).
+pub const Cursor = union(enum) {
+    /// The target has none: there is no target, it is off the screen, or it is friendly or lists
+    /// components.
+    none,
+    /// Beyond the screen's reach (`pixelOf`), as the aim point just in front of the camera's plane
+    /// is: never near the middle.
+    beyond,
+    /// At a pixel.
+    at: [2]i32,
+};
+
+/// Draws the reticle as `hud_draw` does in view 0, for the target's lead cursor `target_at`, and
+/// says whether blind fire aims at it, which the game keeps as the object's `blind_fire_aim`. The
+/// chase view draws neither the reticle nor the sight.
 pub fn drawReticle(
     state: *State,
     art: *Art,
@@ -3025,7 +3050,7 @@ pub fn drawReticle(
     target: device.Device,
     screen: [2]u32,
     mode: camera.CockpitMode,
-    target_at: ?[2]i32,
+    target_at: Cursor,
     blind_fire: BlindFire,
     frame_duration: i32,
     colour: [4]f32,
@@ -3036,22 +3061,32 @@ pub fn drawReticle(
     const middle: [2]i32 = .{ @as(i32, @intCast(screen[0])) >> 1, @as(i32, @intCast(screen[1])) >> 1 };
     const drawn = mode != .chase;
     if (drawn) try drawShapeWith(art, gpa, target, reticle_shape, middle, colour, scale, how);
-    const found = target_at orelse {
-        if (drawn) try drawShapeWith(art, gpa, target, reticle_shape, middle, colour, scale, how);
-        state.reticle_bright = false;
-        return false;
+    const found: ?[2]i32 = switch (target_at) {
+        .none => {
+            if (drawn) try drawShapeWith(art, gpa, target, reticle_shape, middle, colour, scale, how);
+            state.reticle_bright = false;
+            return false;
+        },
+        .beyond => null,
+        .at => |at| at,
     };
     const near = pixels(under_reticle, scale);
-    var bright = found[0] > middle[0] - near and found[0] < middle[0] + near and
-        found[1] > middle[1] - near and found[1] < middle[1] + near;
+    var bright = if (found) |cursor|
+        cursor[0] > middle[0] - near and cursor[0] < middle[0] + near and
+            cursor[1] > middle[1] - near and cursor[1] < middle[1] + near
+    else
+        false;
     const reach: [2]i32 = .{ pixels(blind_fire_reach[0], scale), pixels(blind_fire_reach[1], scale) };
-    const apart: [2]i32 = .{ found[0] - middle[0], found[1] - middle[1] };
     var at = middle;
     var aims = false;
-    const within = @abs(apart[0]) < reach[0] and @abs(apart[1]) < reach[1];
+    const taken: ?[2]i32 = if (found) |cursor|
+        if (@abs(cursor[0] - middle[0]) < reach[0] and @abs(cursor[1] - middle[1]) < reach[1]) cursor else null
+    else
+        null;
+    const within = taken != null;
     if (within and blind_fire == .on) {
-        at = found;
-        state.sight = found;
+        at = taken.?;
+        state.sight = taken.?;
         aims = true;
         bright = true;
     } else if (!(within and blind_fire == .excluded)) {
@@ -3203,9 +3238,9 @@ pub fn drawTarget(
     edge_line: EdgeLine,
     colour: [4]f32,
     scale: f32,
-) (spr.Error || Allocator.Error)!?[2]i32 {
+) (spr.Error || Allocator.Error)!Cursor {
     state.chase_pointer = null;
-    const index = state.target orelse return null;
+    const index = state.target orelse return .none;
     const all = scene.all;
     const sight = scene.sight;
     const ship = &all.slots[all.player];
@@ -3217,13 +3252,14 @@ pub fn drawTarget(
     const part = ai.targetPart(all, state.shown);
     const node: math.Place = if (part) |found| found.drawn() else struck.drawn;
     const seen = sight.view(node.position);
-    if (!sight.onScreen(sight.pixel(seen)) or seen[2] < 0) {
+    const on_screen = if (sight.pixel(seen)) |at| sight.onScreen(at) else false;
+    if (!on_screen or seen[2] < 0) {
         const way = pointerDirection(ship.drawn, node.position);
         if (scene.mode == .chase) state.chase_pointer = .toward(way, hostile);
         try drawOffScreen(art, &fonts.small, gpa, target, sight, way, hostile, range, scene.mode, edge_line, colour, scale);
-        return null;
+        return .none;
     }
-    if (!(seen[2] > 0)) return null;
+    if (!(seen[2] > 0)) return .none;
 
     // The node's box, the component's for a subtarget, as the camera sees it.
     const box = if (part) |found| partBox(found) else [2]Vector{ gameobj.vector(struck.object.bounds_min), gameobj.vector(struck.object.bounds_max) };
@@ -3248,15 +3284,19 @@ pub fn drawTarget(
             try drawShape(art, gpa, target, first + n, at, dim, scale);
         }
     }
+    // The range goes by the box's far corner, which a box reaching behind the camera throws
+    // beyond the screen's reach, and the range with it.
     const offset = pointOf(range_offset) * @as(Point, @splat(scale));
-    _ = try drawText(&fonts.new, gpa, target, .{ round(high[0]) + round(offset[0]), round(high[1] + offset[1]) }, range, colour, .right, scale);
+    if (pixelOf(high)) |corner| {
+        _ = try drawText(&fonts.new, gpa, target, .{ corner[0] + round(offset[0]), round(high[1] + offset[1]) }, range, colour, .right, scale);
+    }
 
-    if (struck.object.flags.components or struck.object.side == .friendly) return null;
-    const lead = ai.leadAim(all, all.player, state.shown, 1) orelse return null;
+    if (struck.object.flags.components or struck.object.side == .friendly) return .none;
+    const lead = ai.leadAim(all, all.player, state.shown, 1) orelse return .none;
     state.lead_point = lead;
     const aim: Point = sight.projection.project(sight.view(lead));
-    const cursor: [2]i32 = .{ round(aim[0]), round(aim[1]) };
-    try drawShape(art, gpa, target, lead_shape, cursor, colour, scale);
+    const cursor: Cursor = if (pixelOf(aim)) |at| .{ .at = at } else .beyond;
+    if (cursor == .at) try drawShape(art, gpa, target, lead_shape, cursor.at, colour, scale);
     const toward: Point = sight.projection.project(sight.view(struck.drawn.position));
     if (leadLine(aim, toward, state.lock.count, scale)) |line| {
         drawLine(target, whole(line[0]), whole(line[1]), art.paletteColour(line_colour.hostile), scale);
@@ -3648,7 +3688,7 @@ const TargetDrawing = struct {
     }
 
     /// Draws `state`'s target in `scene`, and says where the lead cursor stands.
-    fn draw(drawing: *TargetDrawing, gpa: Allocator, state: *State, scene: TargetScene) !?[2]i32 {
+    fn draw(drawing: *TargetDrawing, gpa: Allocator, state: *State, scene: TargetScene) !Cursor {
         return drawTarget(state, &drawing.art, &drawing.fonts, gpa, drawing.recorder.interface(), scene, .from_tip, .{ 1, 1, 1, 1 }, 1);
     }
 
@@ -3674,7 +3714,7 @@ test "a target out of sight gets an arrow and a marker" {
 
     // From the cockpit, three lines of the arrow, and no lead cursor.
     const scene: TargetScene = .{ .sight = testSight(), .all = all, .mode = .cockpit };
-    try std.testing.expectEqual(null, try drawing.draw(gpa, &t.state, scene));
+    try std.testing.expectEqual(Cursor.none, try drawing.draw(gpa, &t.state, scene));
     try std.testing.expectEqual(3, drawing.lines());
     // The chase view draws none.
     drawing.recorder.clear();
@@ -3703,8 +3743,29 @@ test "a hostile target ahead gets the lead cursor, whose point blind fire aims a
     defer drawing.deinit(gpa);
 
     const scene: TargetScene = .{ .sight = testSight(), .all = all, .mode = .cockpit };
-    try std.testing.expect(try drawing.draw(gpa, &t.state, scene) != null);
+    try std.testing.expect(try drawing.draw(gpa, &t.state, scene) == .at);
     try std.testing.expectEqual(ai.leadAim(all, all.player, t.state.shown, 1).?, t.state.lead_point);
+}
+
+test "a target whose box reaches behind the camera loses its range, not the game" {
+    var t: TargetingTest = undefined;
+    try t.init();
+    defer t.deinit();
+    const all = t.mission.objects;
+    // A wide ship close ahead, the near face of its box a hair in front of the camera's plane.
+    const close = try t.add(.sabre, .{ 0, 0, 1000 });
+    all.slots[close].object.bounds_min = .{ .x = -5000, .y = -5000, .z = -999.9999 };
+    all.slots[close].object.bounds_max = .{ .x = 5000, .y = 5000, .z = 1000 };
+    input.setPlayerTarget(&t.state, all, @intCast(close), -1, false);
+    const gpa = std.testing.allocator;
+    var drawing: TargetDrawing = undefined;
+    try drawing.init(gpa);
+    defer drawing.deinit(gpa);
+    // Characters as wide as the game's, which a range set to the right of its corner steps back
+    // across.
+    @memset(&drawing.fonts.new.widths, 8);
+    const scene: TargetScene = .{ .sight = testSight(), .all = all, .mode = .cockpit };
+    _ = try drawing.draw(gpa, &t.state, scene);
 }
 
 test "the radar's contacts" {
@@ -3809,15 +3870,41 @@ test "the sight glides back to the middle" {
     defer recorder.deinit();
     const target = recorder.interface();
     var art: Art = .{ .set = undefined, .images = &.{} };
-    const aims = try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .{ 600, 400 }, .on, 10, .{ 1, 1, 1, 1 }, 1, null);
+    const aims = try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .{ .at = .{ 600, 400 } }, .on, 10, .{ 1, 1, 1, 1 }, 1, null);
     try std.testing.expect(!aims);
     try std.testing.expectEqual([2]i32{ 310, 240 }, state.sight.?);
     // Within its reach, blind fire takes the target.
-    try std.testing.expect(try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .{ 350, 260 }, .on, 10, .{ 1, 1, 1, 1 }, 1, null));
+    try std.testing.expect(try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .{ .at = .{ 350, 260 } }, .on, 10, .{ 1, 1, 1, 1 }, 1, null));
     try std.testing.expectEqual([2]i32{ 350, 260 }, state.sight.?);
     // A gun it does not aim leaves the sight where it is.
-    _ = try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .{ 350, 260 }, .excluded, 10, .{ 1, 1, 1, 1 }, 1, null);
+    _ = try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .{ .at = .{ 350, 260 } }, .excluded, 10, .{ 1, 1, 1, 1 }, 1, null);
     try std.testing.expectEqual([2]i32{ 350, 260 }, state.sight.?);
+    // A cursor beyond the screen's reach is as far as can be: the sight glides back.
+    try std.testing.expect(!try drawReticle(&state, &art, std.testing.allocator, target, screen, .chase, .beyond, .on, 10, .{ 1, 1, 1, 1 }, 1, null));
+    try std.testing.expectEqual([2]i32{ 340, 250 }, state.sight.?);
+    try std.testing.expect(!state.reticle_bright);
+}
+
+test pixelOf {
+    try std.testing.expectEqual([2]i32{ 320, 240 }, pixelOf(.{ 320.4, 239.6 }).?);
+    // Beyond the screen's reach, as a point a hair in front of the camera's plane projects, and
+    // no number at all, count no pixel.
+    try std.testing.expectEqual(null, pixelOf(.{ 3.2e9, 240 }));
+    try std.testing.expectEqual(null, pixelOf(.{ 320, -std.math.inf(f32) }));
+    try std.testing.expectEqual(null, pixelOf(.{ std.math.nan(f32), 240 }));
+}
+
+test "an object a hair in front of the camera's plane stands far from the reticle" {
+    var t: TargetingTest = undefined;
+    try t.init();
+    defer t.deinit();
+    const all = t.mission.objects;
+    _ = try t.add(.sabre, .{ 1000, 1000, 0.0001 });
+    try std.testing.expectEqual(null, testSight().pixel(testSight().view(.{ 1000, 1000, 0.0001 })));
+    try std.testing.expectEqual(null, underReticle(all, testSight(), 1));
+    // One dead ahead after it is still found.
+    const ahead = try t.add(.sabre, .{ 0, 0, 5000 });
+    try std.testing.expectEqual(ahead, underReticle(all, testSight(), 1).?);
 }
 
 /// A sound player of `voices` voices, with `stdsmp` of `count` sounds.

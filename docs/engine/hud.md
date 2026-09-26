@@ -340,6 +340,13 @@ On the screen:
   and a line in entry `0x26` from 5 out of it, along the axis the target lies farther on, toward
   the target, shorter by 0.28 for each unit the lock's count is short of 100.
 
+A point just in front of the camera's plane falls far beyond the screen, past what `sr_round`
+(`0x004C3330`) turns into an `int`. The game takes the least `int` for it, and its sums with that
+wrap, which leaves it as far from anything on the screen. OpenReliant takes a point more than
+`1 << 24` pixels out as no pixel at all (`hud.pixelOf`): an object there is not under the reticle,
+a box reaching there draws no range, and a lead cursor there is not drawn and stands far from the
+middle for the reticle.
+
 The range in the game is the text of the tables `0x004A2AF0` builds: `friendly_text_colours`,
 `hostile_text_colours` and `neutral_text_colours` by the target's side, which change only index
 `0xF7`, and `text_colours` for the marker's. `newfont.fnt` uses none of `0xF7`, so the range by

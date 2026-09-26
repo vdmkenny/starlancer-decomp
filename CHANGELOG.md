@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/vdmkenny/openreliant/compare/v0.4.0...v0.5.0) (2026-09-26)
+
+
+### Features
+
+* joysticks --watch shows every axis and button by its number, in place ([#299](https://github.com/vdmkenny/openreliant/issues/299)) ([53e34b6](https://github.com/vdmkenny/openreliant/commit/53e34b6f3256082937034541821c9085fd6a2e24))
+* missions load and bind as a mission's start does ([#284](https://github.com/vdmkenny/openreliant/issues/284)) ([ee4a103](https://github.com/vdmkenny/openreliant/commit/ee4a1038a0091025c6947005523821f3a6f6d58e))
+* the sandbox is mission 0, a mission file played through the mission's start ([#302](https://github.com/vdmkenny/openreliant/issues/302)) ([8f9a795](https://github.com/vdmkenny/openreliant/commit/8f9a795719230406191279ddd325dc6fa0f3f649))
+* the script VM runs a mission's threads, calls, clock and timers ([#296](https://github.com/vdmkenny/openreliant/issues/296)) ([63192ab](https://github.com/vdmkenny/openreliant/commit/63192ab0c3f30dba4290032223328fb2c6456209))
+* write mission files and assemble their scripts ([#286](https://github.com/vdmkenny/openreliant/issues/286)) ([88ef23c](https://github.com/vdmkenny/openreliant/commit/88ef23c37fad77e027e243ac7ca199a81ac7b1c5))
+
 ## [0.4.0](https://github.com/vdmkenny/openreliant/compare/v0.3.0...v0.4.0) (2026-09-25)
 
 

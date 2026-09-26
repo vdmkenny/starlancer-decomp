@@ -16,6 +16,7 @@ const Allocator = std.mem.Allocator;
 const math = @import("../surrender/math.zig");
 const Vector = math.Vector;
 const srcore = @import("../surrender/surrenderlib/srcore.zig");
+const events = @import("mission/events.zig");
 const explode = @import("explode.zig");
 const gameobj = @import("gameobj.zig");
 const hud = @import("hud.zig");
@@ -113,12 +114,12 @@ pub fn toggle(world: gameobj.World, index: u16) void {
     if (slot.object.flags.cloaked) uncloak(world, index) else cloakOn(world, index);
 }
 
-/// `object_cloak` (`0x00463640`): the object in slot `index` cloaks. Its cloak starts to come on:
-/// each part that cloaks is drawn see-through (`seeThrough`) and shimmers (`shimmerOn`); and it
-/// sounds `CLOAK01`, on the player's voices for the player's ship.
-///
-/// Not ported: the Cloaked event ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+/// `object_cloak` (`0x00463640`): the object in slot `index` cloaks, its Cloaked event posted
+/// first (`events.cloaked`). Its cloak starts to come on: each part that cloaks is drawn
+/// see-through (`seeThrough`) and shimmers (`shimmerOn`); and it sounds `CLOAK01`, on the player's
+/// voices for the player's ship.
 fn cloakOn(world: gameobj.World, index: u16) void {
+    events.cloaked(world, index, true);
     const all = world.objects;
     const slot = &all.slots[index];
     slot.object.flags.cloaked = true;
@@ -130,12 +131,12 @@ fn cloakOn(world: gameobj.World, index: u16) void {
 }
 
 /// `object_uncloak` (`0x00463780`): the cloak of the object in slot `index`, where it has one,
-/// starts to go, and it sounds `CLOAK01` as it does coming on.
-///
-/// Not ported: the Decloaked event ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+/// starts to go, its Decloaked event posted first (`events.cloaked`), and it sounds `CLOAK01` as it
+/// does coming on.
 pub fn uncloak(world: gameobj.World, index: u16) void {
     const slot = &world.objects.slots[index];
     const cloak = if (slot.cloak) |*kept| kept else return;
+    events.cloaked(world, index, false);
     cloak.going = true;
     cloak.changing = true;
     cloak.going_at = world.clock.frame_start;

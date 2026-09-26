@@ -391,9 +391,9 @@ more bits. And the light lights what is round the blast while the halves show, a
 are. `--original` restores the game's.
 
 [`explode/uber.zig`](../../src/engine/game/explode/uber.zig) ports the Uber Explode, and
-[`aiexplode.zig`](../../src/engine/game/aiexplode.zig) the order. Not ported: the multiplayer part
-([#55](https://github.com/vdmkenny/openreliant/issues/55)) and the explosion event
-([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+[`aiexplode.zig`](../../src/engine/game/aiexplode.zig) the order. Its end posts its owner's
+ExplosionShip event ([Script VM](script-vm.md#events)). Not ported: the multiplayer part
+([#55](https://github.com/vdmkenny/openreliant/issues/55)).
 
 ## Electric rays
 

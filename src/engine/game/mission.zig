@@ -1,14 +1,15 @@
-//! `C:\lancer\game\mission.cpp`: a mission in play. Its file bound (`bind`), its script run each
-//! frame (`Loaded.process`), its ships kept where their objects are (`syncShips`), and its flight
-//! groups listed in the wings (`buildWings`).
+//! `C:\lancer\game\mission.cpp`: a mission in play. Its file bound (`bind`), its events raised on
+//! its script's triggers (`events`), its script run each frame (`Loaded.process`), its ships kept
+//! where their objects are (`syncShips`), and its flight groups listed in the wings
+//! (`buildWings`).
 //!
-//! Not ported: the second and third wings' lists (`0x00515D7C`, `0x00515D94`), which nothing reads,
-//! and the events and the triggers ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+//! Not ported: the second and third wings' lists (`0x00515D7C`, `0x00515D94`), which nothing reads.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const bind = @import("mission/bind.zig");
+pub const events = @import("mission/events.zig");
 pub const Mission = bind.Mission;
 
 const dte = @import("../../formats/dte.zig");
@@ -26,41 +27,48 @@ pub const wing_size = 6;
 /// A wing's ships (`player_wing`, `0x00515D88`, for the player's): a slot each, null for none.
 pub const WingSlots = [wing_size]?u16;
 
-/// A mission loaded for play (`mission_loaded`): its file bound, and its script, which runs on it.
+/// A mission loaded for play (`mission_loaded`): its file bound, its script, which runs on it, and
+/// its events.
 pub const Loaded = struct {
     bound: Mission,
     script: vm.Machine,
+    events: events.Events,
     /// The game's ticks when the script's clock started (`vm_clock_start`), from which it counts
     /// the mission's seconds (`tickClock`).
     clock_from: u32 = 0,
 
     /// Binds `image`, made in `gpa`, which the mission then owns, with its script ready to start
-    /// (`mission_bind_sections`). The script draws its random numbers from `random`.
+    /// (`mission_bind_sections`) and no events waiting (`init_mission`). The script draws its
+    /// random numbers from `random`.
     pub fn create(gpa: Allocator, image: []u8, random: *libcmt.Rand) !*Loaded {
         const loaded = gpa.create(Loaded) catch |err| {
             gpa.free(image);
             return err;
         };
         errdefer gpa.destroy(loaded);
-        loaded.* = .{ .bound = try .bind(gpa, image), .script = undefined };
+        loaded.* = .{ .bound = try .bind(gpa, image), .script = undefined, .events = undefined };
         loaded.script = .init(gpa, &loaded.bound, random);
+        loaded.events = .init(gpa, &loaded.script);
         return loaded;
     }
 
     pub fn destroy(loaded: *Loaded) void {
         const gpa = loaded.bound.gpa;
+        loaded.events.deinit();
         loaded.script.deinit();
         loaded.bound.deinit();
         gpa.destroy(loaded);
     }
 
-    /// The script's start as binding the mission ends (`vm_clock_start`, `mission_script_start`),
-    /// its clock counting the seconds from `game`'s, then what the mission's start does next with
-    /// the mission: the ships' records kept where their objects are (`syncShips`), the script's
-    /// clock back to 0, the objects' count set to the mission's ships' (`game_object_count`), so
-    /// that the ships the script makes later take the first slots, and the frame's work run once
-    /// (`process`). The script acts on the game through `game`.
+    /// The watches of the proximity conditions, as the mission's tables are made
+    /// (`events.Events.watch`); the script's start as binding the mission ends (`vm_clock_start`,
+    /// `mission_script_start`), its clock counting the seconds from `game`'s; then what the
+    /// mission's start does next with the mission: the ships' records kept where their objects are
+    /// (`syncShips`), the script's clock back to 0, the objects' count set to the mission's ships'
+    /// (`game_object_count`), so that the ships the script makes later take the first slots, and
+    /// the frame's work run once (`process`). The script acts on the game through `game`.
     pub fn start(loaded: *Loaded, game: aigeneric.Context) !void {
+        try loaded.events.watch(game.world.objects.players);
         loaded.clock_from = game.clock.game_ticks;
         loaded.script.game = game;
         try loaded.script.start();
@@ -71,14 +79,22 @@ pub const Loaded = struct {
         loaded.process(game);
     }
 
+    /// `events_flush` (`0x0045B840`), once a frame from `mission_frame`, before `process`: the
+    /// events waiting are raised on the script's triggers (`events.Events.flush`), which act on the
+    /// game through `game`.
+    pub fn flush(loaded: *Loaded, game: aigeneric.Context) void {
+        loaded.script.game = game;
+        loaded.events.flush();
+    }
+
     /// `process_mission` (`0x0045A570`), once a frame from `mission_frame`: the script's threads
     /// run on (`vm.Machine.runThreads`), the mission's ships take their objects' places
-    /// (`syncShips`), and once the script's clock has ticked, its timers run. The script acts on
-    /// the game through `game`.
+    /// (`syncShips`), and once the script's clock has ticked, its timers run and the watches of
+    /// the proximity conditions look for ships close by (`events.Events.checkProximity`). The
+    /// script acts on the game through `game`.
     ///
-    /// Not ported: the script debugger's pause, which holds the threads and the timers, and the
-    /// checks of the proximity conditions after the timers (`0x0045AF60`), which are the triggers'
-    /// ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+    /// Not ported: the script debugger's pause, which holds the threads, the timers and the
+    /// watches.
     pub fn process(loaded: *Loaded, game: aigeneric.Context) void {
         const script = &loaded.script;
         script.game = game;
@@ -87,6 +103,7 @@ pub const Loaded = struct {
         if (script.ticked and script.timers_running) {
             script.runTimers();
             script.ticked = false;
+            loaded.events.checkProximity(game.world);
         }
     }
 

@@ -70,8 +70,9 @@ OpenReliant binds all 44 shipped missions. `openreliant missions` lists the miss
 holds and binds each ([Platform](../port/platform.md)). A section that runs past the file fails to
 bind, where the game would read past its buffer.
 
-Not yet ported: the trigger lists, which are the triggers'
-([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+The watches of the proximity conditions, which binding makes last (`0x0045AE10`), OpenReliant
+makes as the mission starts, before its script, once the players' slots are known
+([Script VM](script-vm.md#watches)).
 
 ## The mission's start
 
@@ -166,5 +167,4 @@ setting up and the loading screen, which are the front end's
 ([#43](https://github.com/vdmkenny/openreliant/issues/43)), the chat line, a multiplayer game, and
 what the start does for the campaign, the pilots it gives the player's wing, mission 25's first
 part's cockpit, the Kamov's, and the pilot's profile
-([#301](https://github.com/vdmkenny/openreliant/issues/301)); and the triggers
-([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+([#301](https://github.com/vdmkenny/openreliant/issues/301)).

@@ -185,6 +185,8 @@ too.
 - Mission 0, OpenReliant's sandbox, gives the three fates even odds, and `openreliant` starts a
   mission again once it is over.
 
-Not ported: the radio's words ([#48](https://github.com/vdmkenny/openreliant/issues/48)); the
-mission's Destroyed and Scooped events ([#37](https://github.com/vdmkenny/openreliant/issues/37));
-and a multiplayer game ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
+Eject and Eject Spin post the ship's Destroyed event as they begin, and Scoop Up the ship's
+ObjectScooped as it has the pod aboard ([Script VM](script-vm.md#events)).
+
+Not ported: the radio's words ([#48](https://github.com/vdmkenny/openreliant/issues/48)), and a
+multiplayer game ([#55](https://github.com/vdmkenny/openreliant/issues/55)).

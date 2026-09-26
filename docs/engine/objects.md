@@ -616,6 +616,9 @@ The player's ship has the camera watch its end, locked: a spin-out slower than 1
 pulling away (view 8), a faster one from where the camera was (view `0x1A`), a burst from there
 watching where it burst (view `0x1B`), and a halt from behind. `mission_ending` becomes 1.
 
+A ship's end, and the limpet car's, posts its Destroyed event for the mission's triggers
+([Script VM](script-vm.md#events)).
+
 [`ai.zig`](../../src/engine/game/ai.zig) ports `object_destroyed` as `objectDestroyed`,
 [`collision.zig`](../../src/engine/game/collision.zig) the armour damage as `armorDamage`,
 [`aiexplode.zig`](../../src/engine/game/aiexplode.zig) Explode,
@@ -626,9 +629,10 @@ watching where it burst (view `0x1B`), and a halt from behind. `mission_ending` 
 The blasts' break-up, particles, fireballs, burning bits and shockwaves are in
 [Effects](effects.md). Not ported: what a few types set off first
 ([#238](https://github.com/vdmkenny/openreliant/issues/238)); the Ulysses' own end
-([#232](https://github.com/vdmkenny/openreliant/issues/232)); and what
-the end tells the mission, the kill and the radio's lines on it, and the Destroyed event
-([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+([#232](https://github.com/vdmkenny/openreliant/issues/232)); the radio's lines on the kill
+([#48](https://github.com/vdmkenny/openreliant/issues/48)); and the pilots' records the end keeps,
+its pilot taken off the wing's list (`0x0058A958`) and marked lost (`0x005047D0`)
+([#301](https://github.com/vdmkenny/openreliant/issues/301)).
 
 ## Components
 
@@ -689,9 +693,11 @@ hull; for that one, it marks the ship unpowered and exploding, hides its force f
 two ([Effects](effects.md#splits)), credits the kill as above and ends it with `object_hull_lost`.
 The second answers false for every part.
 
+Each part the pass takes out that the object lists as a component posts the component's Destroyed
+event first ([Script VM](script-vm.md#events)).
+
 [`objects.zig`](../../src/engine/game/objects.zig) ports the pass as `loseComponents` and
-`node_destroy` as `destroyPart`. Not ported: the Destroyed events
-([#37](https://github.com/vdmkenny/openreliant/issues/37)), the subtarget's red parts
+`node_destroy` as `destroyPart`. Not ported: the subtarget's red parts
 ([#45](https://github.com/vdmkenny/openreliant/issues/45)), the types' own extras
 ([#238](https://github.com/vdmkenny/openreliant/issues/238)) and the Ulysses' routine
 ([#232](https://github.com/vdmkenny/openreliant/issues/232)).

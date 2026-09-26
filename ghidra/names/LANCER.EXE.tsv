@@ -104,29 +104,29 @@ address	kind	name	type	comment
 0045d0d0	function	trigger_thread_running	bool __fastcall (Trigger *trigger)	Whether a thread the trigger started is still running, which keeps it from starting another
 0045ce70	function	trigger_raise_event	void __fastcall (ushort object, byte qualifier, Condition condition, uint *values, ushort count)	Raises an event on an object, then resets condition_verdict
 00453210	function	condition_raise		Asks the condition's handlers for a verdict, then raises the event on the flight group and the squads holding it
-0045b7c0	function	event_post	void __fastcall (MissionShip *ship, byte qualifier, Condition condition, uint *values, byte count)	Queues an event on a ship
-0045b690	function	event_post_group	void __fastcall (MissionShip *ship, Condition condition, byte count, uint *values, byte qualifier)	Queues an event on a ship, to be raised on its flight group and squads as well
+0045b7c0	function	event_post	void __fastcall (MissionShip *ship, byte qualifier, Condition condition, uint *values, byte count)	Queues an event on a ship, where one of the ship's own triggers would answer it (event_would_fire)
+0045b690	function	event_post_group	void __fastcall (MissionShip *ship, Condition condition, byte count, uint *values, byte qualifier)	Queues an event on a ship, to be raised on its flight group and squads as well, where a trigger of the ship's, of its flight group's or of a squad's holding it would answer it
 0045b840	function	events_flush	void __fastcall (void)	Raises every queued event, then empties the queue
 0052abd8	data	event_queue		Events waiting for events_flush, 0x30 bytes each: QueuedEvent
 005373e4	data	event_queue_count	uint	
 0045a9b0	function	event_launched		Queues Launched for a live object's ship
 0045a9e0	function	event_shot_at		Queues ShotAt: attacker, the victim's damage value twice, victim, and -1 for the weapon
 0045aa60	function	event_destroyed		Queues Destroyed for a ship, or for one of its components, marking it destroyed
-00404ee0	function	event_ship_reached		Queues ShipReached for a ship
+00404ee0	function	event_ship_reached		Raises ShipReached at once on a ship's object, with the ship given (trigger_raise_event)
 0045ac60	function	mission_wings_build	void (void)	Lists each flight group whose byte at +0x08 names a wing, 0 to 2, in that wing's table, six slots each: its +0x09 ships from its first in the mission's ship list (+0x0C) take the slots from the first, each object getting the wing's number at +0x74C, and the slot after the last is set to -1
 0045ac30	function	ship_object	GameObject * __fastcall (MissionShip *ship)	The live object of a mission ship
 0045a970	function	object_ship	MissionShip * __fastcall (GameObject *object)	The mission ship of a live object, or null
 0045ade0	function	object_component_index	uint __fastcall (GameObject *object, ModelNode *node)	A component's index among a live object's components, or 0xFF
-00452cb0	function	ship_damage_value	int __fastcall (MissionShip *ship, byte component)	The lowest of the four armor values of a ship's live object, or a component's own, truncated
+00452cb0	function	ship_damage_value	int __fastcall (MissionShip *ship, byte component)	How much of its armour a ship has lost, in whole hundredths: its weakest quadrant's against six times its type's armour class, or a component's against what it starts with; 100 once any has run out
 00452bb0	function	shot_at_group_begin		Zeroes the damage sums
 00452bd0	function	shot_at_group_add		Adds a member's damage value to the sums
 00452c00	function	shot_at_group_verdict		Replaces the event's damage values with the members' average; never vetoes
 00452c40	function	destroyed_group_begin		Starts the verdict at true
 00452c50	function	destroyed_group_add		Clears the verdict for a member, or its named component, not yet destroyed
 00452ca0	function	destroyed_group_verdict		Returns the verdict
-0045d800	function	cloak_group_add		Passes every member
-0045d810	function	trigger_check_operand	bool __fastcall (EventValue *value, uint *operand, uint event_value, Trigger *trigger)	Checks one trigger operand against the event's value
-004530a0	function	trigger_operand_value	uint __fastcall (uint kinds, uint operand)	What an operand stands for: a number as it is, 0xFFFFFFFE for any ship, else the record a reference names
+0045d800	function	cloak_group_add		Cloaked's and Decloaked's handler for each member: does nothing, so every event goes ahead
+0045d810	function	trigger_check_operand	bool __fastcall (EventValue *value, uint *operand, uint event_value, Trigger *trigger)	Checks one trigger operand against the event's value: any ship passes the players' ships, a number of the proximity conditions is an upper bound, else the two must be equal
+004530a0	function	trigger_operand_value	uint __fastcall (uint kinds, uint operand)	What an operand stands for: a number as it is, 0xFFFFFFFE for any of the players' ships, else the record a reference names
 004530d0	function	reference_resolve	void * __fastcall (uint reference)	The record a reference names
 00453190	function	reference_tag	uint __fastcall (uint reference)	Bits 16 to 23 of a reference
 00453100	function	reference_tag_kind	ushort __fastcall (ushort tag)	The object kind a reference tag selects; a fatal error for any other tag
@@ -140,9 +140,43 @@ address	kind	name	type	comment
 004f6698	data	condition_descriptors	ConditionDescriptor[35]	The condition catalogue
 0052952c	data	condition_table	ConditionDescriptor *	Installed condition catalogue
 00525f8c	data	condition_count	ushort	
-00525f84	data	condition_verdict	byte	The condition handlers' verdict; 1 unless they vetoed the event
+00525f84	data	condition_verdict	byte	The condition handlers' verdict; 1 unless they vetoed the event, set again after each event and by mission_script_start
 0053757c	data	trigger_current	Trigger *	Trigger the matcher is testing
 00538ca0	data	event_values	ObjectEvents *	Each object's last events, which push_event_value reads
+0045a4e0	function	init_mission	void (void)	Readies a mission: the event queue emptied, and mission_initialised set; asserts no mission is initialised
+0045a530	function	destroy_mission	void (void)	Ends a mission: mission_initialised cleared; asserts one is initialised
+005373e8	data	mission_initialised	short	Set by init_mission, cleared by destroy_mission
+0045b4e0	function	event_would_fire	bool __fastcall (ushort object, byte qualifier, Condition condition, uint *values, ushort count)	Whether an event on an object would fire any of its triggers, as trigger_match finds them, whatever their threads; keeps the event for the object and gives its values to a free thread's locals
+0045b330	function	event_queue_room	void (void)	With a thousand events queued, lists them and stops with Trigger List exceeded
+0045aad0	function	event_scooped	void __fastcall (GameObject *object, int slot)	Posts ObjectScooped with the groups for an object's ship: the ship of the object in slot taken aboard
+0045ab10	function	event_ripper_grabbed	void __fastcall (GameObject *object, int slot)	Posts RipperGrabbedObject with the groups for an object's ship: the ship of the object in slot
+0045ab90	function	event_ripper_dropped	void __fastcall (GameObject *object, int slot)	Posts RipperDroppedObject with the groups for an object's ship: the ship of the object in slot
+0045abd0	function	event_fixed_gate_jumped_in	void __fastcall (GameObject *object, int slot)	Posts FixedGateJumpedIn with the groups for an object's ship: the ship of the object in slot
+0045b300	function	event_jumped_in	void __fastcall (GameObject *object)	Posts JumpedIn with the groups for an object's ship: the ship itself
+0045ac10	function	event_post_ship_reached	void __fastcall (MissionShip *ship, MissionShip *reached)	Posts ShipReached on a ship for its own triggers: the ship that came within reach
+00451180	function	event_camera_reached	void __fastcall (MissionShip *ship)	Posts CameraReached on a ship, where there is one
+0045af60	function	mission_proximity_check	void (void)	Once the script's clock has ticked, after the timers: the watches of CloseProximity, Proximity and ShipReached look for ships close by
+0045b170	function	mission_proximity_scan	bool __fastcall (MissionShip *ship, GameObject *object, float reach, Condition condition)	Posts a ship's CloseProximity or Proximity, or its ShipReached, for each other mission ship within the square root of reach; the ship and how far, in the ship's radii
+0045ae10	function	mission_watch_lists	void (void)	Makes the watch lists of CloseProximity, Proximity and ShipReached from the trigger list, as mission_bind_tables ends
+0045ae40	function	mission_watch_list	void __fastcall (void *list, Condition condition)	Makes one condition's watch list: each trigger of it, the object entry whose slice holds it, and a flag set; a trigger of the player's ship watches the other players' ships too
+0045b2b0	function	watch_list_arm	void __fastcall (void *list, Trigger *trigger, byte armed)	Sets the flag of each watch of a trigger in one watch list
+0045b2d0	function	watch_lists_arm	void __fastcall (Trigger *trigger, byte armed)	Sets the flag of each watch of a trigger in the three watch lists
+00536dd8	data	watch_close		CloseProximity's watch list: 12 bytes a watch, the trigger, the object entry whose slice holds it and a flag; a null trigger ends it
+00536758	data	watch_proximity		Proximity's watch list, as watch_close
+0052a5d0	data	watch_reached		ShipReached's watch list, as watch_close
+00453530	function	trigger_owner	void * __fastcall (Trigger *trigger)	The first object entry whose slice holds a trigger, or null
+00453610	function	object_entry_id	uint __fastcall (void *entry)	The object ID of an entry of the object table
+00453200	function	record_object_id	uint __fastcall (void *record)	The object ID a ship's, flight group's or squad's record starts with
+004533d0	function	condition_squad_add	void __fastcall (Squad *squad, ConditionDescriptor *condition, MissionShip *ship, uint *values, ushort *count)	A squad's members for a condition's handler for each member, counting them: a ship as the component its membership names, each ship of a flight group whole, and a squad's own members in turn
+0045d390	function	trigger_set_armed	void __fastcall (Trigger *trigger, byte armed)	Arms or disarms a trigger; arming gives it its count again from +0x1A
+0045d910	function	vm_tag_matches	bool __fastcall (byte component)	Whether push_component named the component for any argument of the running command; with no tag naming it, whether it is 0xFF, the object itself
+0045d300	function	cmd_SetTriggerState		Arms or disarms the triggers of a condition in an entity's slice, of a component named or of the entity itself, and their watches
+0045d3a0	function	cmd_SetAnyTriggerState		Arms or disarms the one trigger of a condition an argument numbers in an entity's slice, its count left as it stands, and its watches
+005294e6	data	shot_at_shield_total	ushort	ShotAt's handlers' total of a group's damage values, for the shield damage
+0052950a	data	shot_at_hull_total	ushort	ShotAt's handlers' total of a group's damage values, for the hull damage; always shot_at_shield_total
+00525f7c	data	destroyed_group_all	byte	Destroyed's handlers' verdict: whether every member counted so far is destroyed
+00545860	data	collision_retrying	byte	Set while objects_collide tests a ship against a hull again after a first hit, which holds back the ShotAt of object_damage and object_armor_damage
+005373f4	data	vm_last_jump	uint	vm_clock when player_jump last took a jump or a warp, which cmd_WhenPlayerLastJumped counts from; 0xFFFF from mission_script_start
 00466500	function	stats_load_ships	void __fastcall (void)	Reads shipstats.bin into ship_flight_stats and ship_combat_stats
 004788f0	function	stats_load_guns	void __fastcall (void)	Reads gunstats.bin to the end of the file into gun_stats, the first record into type 1
 00494bc0	function	stats_load_missiles	void __fastcall (void)	Reads missilestats.bin into missile_flight_stats and missile_stats

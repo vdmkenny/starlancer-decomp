@@ -17,17 +17,19 @@
 //! leaving three smaller in its place, and the limpet car leaves its pod.
 //!
 //! A ship's end credits the player with the kill where the player's ship struck it last
-//! (`killCredit`).
+//! (`killCredit`), and posts its Destroyed event (`events.destroyed`).
 //!
 //! Order 43, Huuuuuuuge Explosion, lies with Explode (`huge`): it sets the Uber Explode off where
 //! the object stands ([`explode/uber.zig`](explode/uber.zig)).
 //!
-//! **Not ported:** what a ship's end tells the mission, the pilots' records and the Destroyed event
-//! ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+//! **Not ported:** the pilots' records a ship's end keeps, its pilot taken off the wing's list
+//! (`0x0058A958`) and marked lost (`0x005047D0`), which are the campaign's
+//! ([#301](https://github.com/vdmkenny/openreliant/issues/301)).
 
 const std = @import("std");
 const assert = std.debug.assert;
 
+const dte = @import("../../formats/dte.zig");
 const math = @import("../surrender/math.zig");
 const Vector = math.Vector;
 const Vec3 = @import("../../formats/shp.zig").Vec3;
@@ -37,6 +39,7 @@ const Context = aigeneric.Context;
 const camera = @import("camera.zig");
 const create = @import("create.zig");
 const deathmatch = @import("deathmatch.zig");
+const events = @import("mission/events.zig");
 const explode = @import("explode.zig");
 const gameobj = @import("gameobj.zig");
 const objects = @import("objects.zig");
@@ -267,14 +270,13 @@ fn shownModel(slot: *create.Slot) ?*objects.Model {
 /// The bits the limpet car's trail has left.
 const limpet_trail = 50;
 
-/// `explode_limpet_car_init` (`0x004094D0`): the car stops dead, unpowered, with a random turn
-/// (`randomSpin`) and a trail to leave, which its update never reaches, and goes up in a fireball
-/// as wide as its radius.
-///
-/// Not ported: the Destroyed event it queues (`event_destroyed`,
-/// [#37](https://github.com/vdmkenny/openreliant/issues/37)).
+/// `explode_limpet_car_init` (`0x004094D0`): the car's Destroyed event is posted
+/// (`events.destroyed`); the car stops dead, unpowered, with a random turn (`randomSpin`) and a
+/// trail to leave, which its update never reaches, and goes up in a fireball as wide as its
+/// radius.
 fn limpetCarInit(ctx: Context, index: u16) void {
     const world = ctx.world;
+    events.destroyed(world, index, dte.Trigger.whole_object);
     const slot = &world.objects.slots[index];
     const object = &slot.object;
     const state = &slot.state.explode;
@@ -315,10 +317,11 @@ fn limpetCarUpdate(ctx: Context, index: u16) void {
 const slow: f32 = 100;
 
 /// `0x004086F0`: a ship's end begins. Close to the camera it is heard at once. It takes a style of
-/// going, the torpedoes always stopping dead, and the player's has the camera watch it, from a view
-/// by the style and how fast it was flying, and the mission end with it. At the end of the
-/// player's ejection (`main.Showing.ejection`) the player's pod stops dead instead, as the Sabre's
-/// view watches it, and its end ends nothing.
+/// going, the torpedoes always stopping dead; the player's credit for the kill is settled
+/// (`killCredit`), and the ship's Destroyed event posted (`events.destroyed`). The player's has the
+/// camera watch it, from a view by the style and how fast it was flying, and the mission end with
+/// it. At the end of the player's ejection (`main.Showing.ejection`) the player's pod stops dead
+/// instead, as the Sabre's view watches it, and its end ends nothing.
 fn shipInit(ctx: Context, index: u16) void {
     const world = ctx.world;
     const slot = &world.objects.slots[index];
@@ -334,6 +337,7 @@ fn shipInit(ctx: Context, index: u16) void {
         else => if (players and cutaway) .halt else @enumFromInt(xtrabits.objectRandom15(object) % std.enums.values(Style).len),
     };
     killCredit(world, index);
+    events.destroyed(world, index, dte.Trigger.whole_object);
 
     if (players and !cutaway) {
         const view: camera.View = switch (state.style) {

@@ -416,7 +416,10 @@ pub const Trigger = extern struct {
     _unknown_17: [2]u8,
     /// Firings left, for `counted`.
     repeat_counter: u8,
-    _unknown_1a: [2]u8,
+    /// The firings a `counted` trigger has each time the script arms it (`SetTriggerState`), which
+    /// `repeat_counter` takes again then (`trigger_set_armed`).
+    repeat_count: u8,
+    _unknown_1b: u8,
     /// Condition arguments, four bytes each, checked against the event's values: those the
     /// condition marks as checked, and of those, the ones whose low halfword is not `0xFFFF`.
     operands: [5]u32,
@@ -480,7 +483,8 @@ pub const Reference = packed struct(u32) {
     /// An operand whose low halfword is this is not set, and is not checked.
     pub const unset: u16 = 0xFFFF;
 
-    /// Set in the index of an operand for a ship value, it matches any ship.
+    /// Set in the index of an operand for a ship value, it matches any of the players' ships: in a
+    /// game of one, the player's.
     pub const any_ship: u16 = 0x2000;
 };
 
@@ -489,7 +493,7 @@ pub const Operand = union(enum) {
     unset,
     /// For a value that is a number: taken as it is.
     number: u32,
-    /// For a ship value: any ship matches.
+    /// For a ship value: any of the players' ships matches.
     any_ship,
     reference: Reference,
     /// A tag the matcher cannot resolve.
@@ -1337,7 +1341,8 @@ pub const Mission = struct {
     }
 
     /// For each trigger, the ID of the object whose slice holds it, or null when none does and
-    /// the trigger can never fire. No trigger is in two slices.
+    /// the trigger can never fire. No shipped trigger is in two slices; for one that is, the first
+    /// object's, as the engine finds it (`0x00453530`).
     pub fn triggerObjects(mission: Mission, allocator: Allocator) (Error || Allocator.Error)![]?u16 {
         const all = try mission.triggers();
         const owners = try allocator.alloc(?u16, all.len);
@@ -1346,7 +1351,9 @@ pub const Mission = struct {
             const first: usize = object.first;
             const end = @min(first + object.count, all.len);
             if (first >= end) continue;
-            for (owners[first..end]) |*owner| owner.* = @intCast(id);
+            for (owners[first..end]) |*owner| {
+                if (owner.* == null) owner.* = @intCast(id);
+            }
         }
         return owners;
     }

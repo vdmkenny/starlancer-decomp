@@ -21,6 +21,7 @@ const ai = @import("ai.zig");
 const aigeneric = @import("aigeneric.zig");
 const Context = aigeneric.Context;
 const create = @import("create.zig");
+const events = @import("mission/events.zig");
 const gameobj = @import("gameobj.zig");
 const guns = @import("guns.zig");
 const matmanager = @import("matmanager.zig");
@@ -466,13 +467,11 @@ const bubble_turn: f32 = 0.5;
 /// the beams, the bubble and the light on over a second, the second beam a little behind the first;
 /// holds the pod still and draws it to `pull_out` off its door, then in; closes its doors, heard
 /// (`doorclos`), as the beams, no longer aimed, the bubble and the light go out; and after a while
-/// has the pod aboard, gone from the mission. Should the pod be gone first, it closes its doors and
-/// gives up.
+/// has the pod aboard, its ObjectScooped event posted (`events.scooped`), and the pod gone from the
+/// mission. Should the pod be gone first, it closes its doors and gives up.
 ///
-/// Not ported: the mission's Scooped event
-/// ([#37](https://github.com/vdmkenny/openreliant/issues/37)); a multiplayer game's wait for every
-/// player, as the beams are made and before the pod is gone
-/// ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
+/// Not ported: a multiplayer game's wait for every player, as the beams are made and before the
+/// pod is gone ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
 pub fn scoopUp(ctx: Context, index: u16) void {
     const world = ctx.world;
     const all = world.objects;
@@ -571,6 +570,7 @@ pub fn scoopUp(ctx: Context, index: u16) void {
         },
         .done => {
             _ = aigeneric.pop(ctx, index);
+            events.scooped(world, index, pod_index);
             create.retire(ctx, pod_index);
         },
         _ => {},

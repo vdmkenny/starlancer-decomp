@@ -9,6 +9,7 @@ const engine = @import("../../engine.zig");
 const Pointer = engine.Pointer;
 const dte = @import("../../formats/dte.zig");
 const bind = @import("mission/bind.zig");
+const events = @import("mission/events.zig");
 const gameobj = @import("gameobj.zig");
 const Routine = gameobj.Routine;
 const camera = @import("camera.zig");
@@ -250,14 +251,13 @@ pub const eject_below = 40;
 /// `object_hull_lost` (`0x00401F00`): the end of a ship that lists components, as the part of its
 /// hull holding it together is destroyed. Its current order gives way as to Explode, its stack is
 /// emptied, and it is marked exploding, so it takes no order again; no Explode order runs it down.
-///
-/// Not ported: the Destroyed event it queues for the ship (`event_destroyed`,
-/// [#37](https://github.com/vdmkenny/openreliant/issues/37)).
+/// Its Destroyed event is posted (`events.destroyed`).
 pub fn hullLost(ctx: aigeneric.Context, index: u16) void {
     const object = &ctx.world.objects.slots[index].object;
     _ = aigeneric.giveWay(ctx, index, .explode) catch false;
     object.order_count = 0;
     object.flags.exploding = true;
+    events.destroyed(ctx.world, index, dte.Trigger.whole_object);
 }
 
 /// `object_destroyed` (`0x00401F30`): a ship's end. An AI ship's pilot ejects where the ship is in

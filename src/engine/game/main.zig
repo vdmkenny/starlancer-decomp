@@ -480,14 +480,12 @@ pub fn controlsFrame(controls: Controls) void {
 /// frame, before the camera's own frame and anything drawn.
 ///
 /// Before the orders, in a frame that runs ticks while the mission plays on and its scene isn't
-/// the landing's, the mission's script (`loaded`) runs its frame's work (`mission.Loaded.process`),
-/// its clock ticking first for the seconds past (`mission.Loaded.tickClock`).
+/// the landing's, the mission (`loaded`) raises the events waiting (`mission.Loaded.flush`) and its
+/// script runs its frame's work (`mission.Loaded.process`), its clock ticking first for the
+/// seconds past (`mission.Loaded.tickClock`).
 ///
 /// Whether the mission is over: as the camera has it (`missionOver`), which sets the script's
 /// `mission_over`, or as the script has it, which ends the mission before the frame's work.
-///
-/// Not ported: the rest of the frame's work, which is the mission's events
-/// ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
 pub fn missionFrame(orders: aigeneric.Context, timing: objects.Timing, loaded: ?*Loaded) bool {
     const over = missionOver(orders.world);
     const player = orders.world.player;
@@ -497,6 +495,7 @@ pub fn missionFrame(orders: aigeneric.Context, timing: objects.Timing, loaded: ?
         if (variables.mission_over != 0) return true;
         if (orders.clock.frame_duration != 0 and player.ending == .playing and player.showing != ._unknown_3) {
             playing.tickClock(orders.clock.game_ticks);
+            playing.flush(orders);
             playing.process(orders);
         }
     }
@@ -1440,6 +1439,7 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     const loaded = try Loaded.create(gpa, image, world.random);
     errdefer loaded.destroy();
     orders.world.mission = &loaded.bound;
+    orders.world.events = &loaded.events;
     try loaded.start(orders);
 
     startWing(all);

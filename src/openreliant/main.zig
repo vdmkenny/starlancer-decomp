@@ -824,6 +824,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
         world.view = view.view;
         world.cockpit = if (cockpit.shown) |*shown| &shown.model else null;
         world.mission = if (play.loaded) |loaded| &loaded.bound else null;
+        world.events = if (play.loaded) |loaded| &loaded.events else null;
         const orders: game.aigeneric.Context = .{ .world = world, .clock = &clock, .devices = &devices };
         while (clock.nextTick(&devices, world)) |_| {}
         clock.frameBegin();

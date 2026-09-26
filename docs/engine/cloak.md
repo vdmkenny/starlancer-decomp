@@ -154,8 +154,10 @@ cloak cloaks once that tick has come, and uncloaks while none is asked for. The 
   clear. The ship the camera sits in isn't drawn, so its parts take the hull's solidity for their
   shadow alone (`cloak.shadeUnseen`).
 
-Not ported: the Cloaked and Decloaked events
-([#37](https://github.com/vdmkenny/openreliant/issues/37)); the mission's `Cloak_ship`
+Cloaking posts the ship's Cloaked event first, and uncloaking a ship with a cloak its Decloaked
+([Script VM](script-vm.md#events)).
+
+Not ported: the mission's `Cloak_ship`
 ([#36](https://github.com/vdmkenny/openreliant/issues/36)); the Jump Out order's uncloak
 ([#30](https://github.com/vdmkenny/openreliant/issues/30)); the Kamov's craft; and the multiplayer
 game's cloak ([#55](https://github.com/vdmkenny/openreliant/issues/55)).

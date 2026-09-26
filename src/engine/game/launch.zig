@@ -23,6 +23,7 @@ const ai = @import("ai.zig");
 const aigeneric = @import("aigeneric.zig");
 const create = @import("create.zig");
 const models = @import("create/models.zig");
+const events = @import("mission/events.zig");
 const gameobj = @import("gameobj.zig");
 const objects = @import("objects.zig");
 const srofiles = @import("srofiles.zig");
@@ -275,16 +276,14 @@ fn letGo(ctx: aigeneric.Context, index: u16) void {
     finish(ctx, index);
 }
 
-/// A launch's end, as each style's last step has it: the ship's Launch order pops, and it can be
-/// targeted again.
-///
-/// Not ported: the Launched event each style's end queues for the ship (`event_launched`,
-/// `0x0045A9B0`, [#37](https://github.com/vdmkenny/openreliant/issues/37)).
+/// A launch's end, as each style's last step has it: the ship's Launch order pops, it can be
+/// targeted again, and its Launched event is posted (`events.launched`).
 pub fn finish(ctx: aigeneric.Context, index: u16) void {
     const slot = &ctx.world.objects.slots[index];
     slot.riding = null;
     _ = aigeneric.pop(ctx, index);
     ai.setTargetable(&slot.object, slot.combat, true);
+    events.launched(ctx.world, index);
 }
 
 /// `launch_start` (`0x00418DB0`): the first Launch among the orders of the ship in slot `index`

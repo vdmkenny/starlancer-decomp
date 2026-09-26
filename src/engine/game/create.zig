@@ -404,6 +404,15 @@ pub const Slot = struct {
         return if (n < parts.len) parts[n] else null;
     }
 
+    /// `object_component_index` (`0x0045ADE0`): where it lists `part` among its components, by
+    /// which the mission's events and its triggers name a component; null where it does not.
+    pub fn componentIndex(slot: *const Slot, part: *const objects.Model.Part) ?u8 {
+        for (slot.listed(), 0..) |entry, n| {
+            if (entry == part) return @truncate(n);
+        }
+        return null;
+    }
+
     /// Lets its guns go: it has none from now on.
     pub fn dropGuns(slot: *Slot, gpa: Allocator) void {
         gpa.free(slot.guns);

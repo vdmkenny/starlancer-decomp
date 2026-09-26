@@ -14,9 +14,7 @@
 //! 1.42857 a share, 0.19635 and 0.349066 radians); OpenReliant divides.
 //!
 //! Not ported: what a blast in a multiplayer game spares, counts and tells the players, which is
-//! multiplayer's ([#55](https://github.com/vdmkenny/openreliant/issues/55)), and the event the
-//! owner's explosion raises at the end (`event_post_explosion`, `0x0045AB50`), which needs the
-//! mission's events ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+//! multiplayer's ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -30,6 +28,7 @@ const srtexture = @import("../../surrender/surrenderlib/srtexture.zig");
 const ai = @import("../ai.zig");
 const aigeneric = @import("../aigeneric.zig");
 const Slot = @import("../create.zig").Slot;
+const events = @import("../mission/events.zig");
 const explode = @import("../explode.zig");
 const gameobj = @import("../gameobj.zig");
 const matmanager = @import("../matmanager.zig");
@@ -507,7 +506,8 @@ pub const Uber = struct {
 
     /// The blast's end: it goes (`uber_explode_free`, `0x004731A0`), its owner's ship sounds
     /// `capexp`, and each ship the ball reached stops turning and, unless it is exploding already,
-    /// is destroyed, neither spinning nor ejecting.
+    /// is destroyed, neither spinning nor ejecting. Last, the owner's ExplosionShip event is posted
+    /// (`events.exploded`).
     fn end(uber: *Uber, world: gameobj.World) void {
         const blast = &uber.blast.?;
         defer uber.blast = null;
@@ -523,6 +523,7 @@ pub const Uber = struct {
             const entry = aigeneric.current(world.objects, caught.index) orelse continue;
             if (entry.order != .explode) ai.objectDestroyed(ctx, caught.index, false, true);
         }
+        events.exploded(world, blast.owner);
     }
 
     /// The blast's objects, in the world's layer: the halves until `faded`, with its light in the

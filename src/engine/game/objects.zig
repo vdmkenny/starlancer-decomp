@@ -24,6 +24,7 @@ const libcmt = @import("../libcmt.zig");
 const xtrabits = @import("xtrabits.zig");
 const Clock = @import("main.zig").Clock;
 const aigeneric = @import("aigeneric.zig");
+const events = @import("mission/events.zig");
 const explode = @import("explode.zig");
 const sound3d = @import("sound3d.zig");
 const shield = @import("shield.zig");
@@ -905,14 +906,14 @@ pub fn frameTree(root: *Node, model: ?*Model, drawn: *Model.Local, fraction: f32
 ///   none after. Any other part goes to the routine the object's type has
 ///   (`explode.ComponentLoss`), which may end the pass over this root, its flag left set.
 /// - Its destruction sets its assembly off (`explode.componentLost`).
-/// - Each part of its assembly that is shown is taken out (`destroyPart`), a part of the hull
-///   ending the ship first (`explode.loseHull`); each hidden one, its damaged model, is shown.
+/// - Each part of its assembly that is shown is taken out (`destroyPart`), a component the object
+///   lists posting its Destroyed event first (`events.destroyed`), and a part of the hull ending
+///   the ship; each hidden one, its damaged model, is shown.
 ///
 /// Then the root's flag is cleared.
 ///
-/// Not ported: the Destroyed event for each component taken out (`event_destroyed`,
-/// [#37](https://github.com/vdmkenny/openreliant/issues/37)), and the subtarget's parts picked out
-/// in red again where the object is the player's target (`hud_subtarget_clear`, `hud_subtarget`,
+/// Not ported: the subtarget's parts picked out in red again where the object is the player's
+/// target (`hud_subtarget_clear`, `hud_subtarget`,
 /// [#45](https://github.com/vdmkenny/openreliant/issues/45)).
 pub fn loseComponents(ctx: aigeneric.Context, index: u16) void {
     const slot = &ctx.world.objects.slots[index];
@@ -952,6 +953,7 @@ fn loseRoot(ctx: aigeneric.Context, index: u16, model: *Model, root: math.Place)
                 piece.hidden = false;
                 continue;
             }
+            if (slot.componentIndex(piece)) |component| events.destroyed(world, index, component);
             if (piece.class == .hull) explode.loseHull(ctx, index);
             destroyPart(slot, .{ .model = model, .index = at });
         }
@@ -1215,6 +1217,8 @@ pub const Model = struct {
         /// assembly it belongs to, such as a turret and its barrels.
         component_armor: i32 = 0,
         link_id: u32 = 0,
+        /// Its part's `component_group`: the parts whose hits count against one component.
+        component_group: u32 = 0,
         /// Its node's flag `0x10`: a component whose destruction `loseComponents` has dealt with,
         /// which is no longer aimed at.
         spent: bool = false,
@@ -1461,6 +1465,7 @@ pub const Model = struct {
                 .turret_kind = source.part.turret_kind,
                 .turret_slot = source.part.turret_slot,
                 .link_id = source.part.link_id,
+                .component_group = source.part.component_group,
                 .force_field = shield.isForceField(source.part.name()),
                 .parent = parentOf(model, index),
                 .origin = @splat(0),
@@ -1980,6 +1985,20 @@ pub const Model = struct {
             if (mount.model.holds(other)) return true;
         }
         return false;
+    }
+
+    /// The part a hit on part `index` counts against for the mission's events (`component_damage`,
+    /// `0x00464A0A`): the first part left in the model that its record marks a component, of the
+    /// part's group (`Part.component_group`) where it has one, else of its assembly; the part
+    /// itself where there is none.
+    pub fn countedAgainst(model: *Model, index: usize) *Part {
+        const struck = &model.parts[index];
+        for (model.parts) |*part| {
+            if (part.removed or !part.flags.component) continue;
+            const same = if (struck.component_group != 0) part.component_group == struck.component_group else part.link_id == struck.link_id;
+            if (same) return part;
+        }
+        return struck;
     }
 
     /// The parts of assembly `link`, those whose part records share the link id, in part order,
@@ -3495,12 +3514,12 @@ test "a track plays once, round and round, and back and forth" {
     const mesh = try srmesh.testing.square(gpa);
     defer mesh.deinit(gpa);
     var keys = [_]shp.Keyframe{ testingKey(0, .{ 0, 0, 0 }, .{ 0, 0, 0 }), testingKey(100, .{ 0, 0, 0 }, .{ 0, 0, 100 }) };
-    var events = [_]shp.ClipEvent{
+    var clip_events = [_]shp.ClipEvent{
         .{ .time = 10, .kind = .muzzles, ._unknown_08 = 0 },
         .{ .time = 90, .kind = .puff, ._unknown_08 = 0 },
         .{ .time = 50, .kind = @enumFromInt(3), ._unknown_08 = 0 },
     };
-    var tracks = [_]shp.Track{.{ .clip = testingClip(100, .once, "fire"), .keyframes = &keys, .events = &events }};
+    var tracks = [_]shp.Track{.{ .clip = testingClip(100, .once, "fire"), .keyframes = &keys, .events = &clip_events }};
     var animated: Animated = undefined;
     animated.init(&mesh, &tracks);
     var model: Model = try .create(gpa, &animated.source, &animated.loaded, .{});

@@ -183,6 +183,7 @@ Stride `0x30`. A trigger runs a block of script when an event it watches happens
 | `0x15` | Qualifier: the component of the subject watched, by index; `0xFF` for the subject itself |
 | `0x16` | Zero runs the block's thread at once, inside the event; otherwise the scheduler does |
 | `0x19` | Firings left, for repeat mode 2 |
+| `0x1A` | The firings repeat mode 2 has each time the script arms the trigger (`SetTriggerState`), which `0x19` takes again then |
 | `0x1C` | Operands, four bytes each, one for each value the condition's events carry: see [Operands](#operands) |
 
 A trigger holds no subject: it sits in its subject's slice of the trigger list, in the
@@ -196,7 +197,7 @@ No trigger is in two slices, and a trigger in no slice can never fire. The condi
 kinds of object a trigger can belong to, and every trigger agrees with its condition's.
 
 Repeat mode `0` disarms the trigger when it fires, `1` never disarms it, and `2` disarms it when the
-counter at `0x19` runs out.
+counter at `0x19` runs out. A trigger whose operands fail a check stays as it is.
 
 The qualifier must equal the event's. A ship's components, such as a capital ship's turrets and
 subsystems, are numbered among the
@@ -218,7 +219,8 @@ marks the value as checked and the operand's low halfword is not `0xFFFF`. It re
 the value's kind mask (`trigger_operand_value`, `0x004530A0`):
 
 - A number is taken as it is.
-- For a ship value, bit `0x2000` of the low halfword matches any ship.
+- For a ship value, bit `0x2000` of the low halfword matches any of the players' ships: in a game
+  of one, the player's.
 - Anything else is a reference to a ship, a flight group or a squad, which the matcher turns into
   the address of its record, the form in which events pass them:
 

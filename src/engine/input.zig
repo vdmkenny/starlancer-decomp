@@ -960,6 +960,7 @@ const aigeneric = @import("game/aigeneric.zig");
 const objects = @import("game/objects.zig");
 const missiles = @import("game/missiles.zig");
 const cloak = @import("game/cloak.zig");
+const events = @import("game/mission/events.zig");
 const math = @import("surrender/math.zig");
 
 /// What the player's controls keep between updates, which the game holds in globals.
@@ -1298,17 +1299,19 @@ pub fn setPlayerTarget(display: *hud.State, all: *create.Objects, index: i16, co
     display.targetChanged(all, multiplayer);
 }
 
-/// FIRE LASERS, LAUNCH MISSILE, CLOAK SHIP, EJECT and COUNTERMEASURES, which `player_controls`
-/// reads after the steering and the throttle (`0x00413BB5`, `0x00413BE7`, `0x00413CB2`,
-/// `0x00413D88`, `0x00413E80`). FIRE LASERS, held, while the ship isn't jumping, opens the gunnery
-/// display and holds the guns' trigger for the frame (`guns.fire`), which charges a Phoenix's Nova
-/// Cannon, unless the ship is cloaked, when it uncloaks instead (`setCloak`) and fires only once
-/// the cloak has gone; let go, the Phoenix, not jumping, lets its charge go (`guns.nova.release`).
-/// The others each act once a press: the one launches the armed missile (`launchMissile`); CLOAK
-/// SHIP, outside view 13, on a ship that can cloak, uncloaks it where it is cloaked and cloaks it
-/// where it isn't, with the display's sound and Betty's word unless the cloak is still coming on or
-/// going; EJECT ejects the pilot (`eject`); the last, outside a mission's ending, drops a
-/// countermeasure, Betty warning as they run out: at 6, 4 and 2 left, and with none.
+/// FIRE LASERS, LAUNCH MISSILE, CLOAK SHIP, JUMP DRIVE, EJECT and COUNTERMEASURES, which
+/// `player_controls` reads after the steering and the throttle (`0x00413BB5`, `0x00413BE7`,
+/// `0x00413CB2`, `0x00413D67`, `0x00413D88`, `0x00413E80`). FIRE LASERS, held, while the ship
+/// isn't jumping, opens the gunnery display and holds the guns' trigger for the frame
+/// (`guns.fire`), which charges a Phoenix's Nova Cannon, unless the ship is cloaked, when it
+/// uncloaks instead (`setCloak`) and fires only once the cloak has gone; let go, the Phoenix, not
+/// jumping, lets its charge go (`guns.nova.release`). The others each act once a press: the one
+/// launches the armed missile (`launchMissile`); CLOAK SHIP, outside view 13, on a ship that can
+/// cloak, uncloaks it where it is cloaked and cloaks it where it isn't, with the display's sound and
+/// Betty's word unless the cloak is still coming on or going; JUMP DRIVE, while the mission goes on,
+/// takes the jump the mission has ready (`playerJump`); EJECT ejects the pilot (`eject`); the last,
+/// outside a mission's ending, drops a countermeasure, Betty warning as they run out: at 6, 4 and 2
+/// left, and with none.
 /// `aigeneric.playerControl` runs it after `matchSpeed`, since nothing between reads what it does.
 ///
 /// In the mouse's mode the left button fires as FIRE LASERS does, and the right launches as LAUNCH
@@ -1352,6 +1355,7 @@ pub fn playerWeapons(world: gameobj.World, devices: *Devices, index: u16) void {
             betty.sayIn(world, cloak_said.of(on));
         }
     }
+    if (devices.active(.jump_drive, true) and world.player.ending == .playing) playerJump(world);
     if (devices.active(.eject, true)) eject(world, index);
     if (devices.active(.countermeasures, true) and world.player.ending == .playing) {
         const left = world.objects.slots[index].object.countermeasures;
@@ -1442,6 +1446,32 @@ pub fn launchMissile(world: gameobj.World, index: u16) void {
         armed.count -= 1;
         ring.left -= 1;
         return;
+    }
+}
+
+/// `player_jump` (`0x00412B20`): JUMP DRIVE, while the mission goes on, where the mission has a
+/// jump or a warp ready (`hud.Readiness`): the script's clock notes when
+/// (`vm.Machine.last_jumped`), and each one ready is taken, its PlayerReadyToJump or
+/// PlayerReadyToWarp posted on the player's ship (`events.readyToJump`).
+///
+/// **Unverified:** it first closes the target display's large form, or else its small one, where
+/// two words say it is open (`0x0057BEA8`, `0x0057BE44`); nothing writes them, so it never does.
+///
+/// Not ported: a multiplayer game, where it waits on `0x00588735` and tells the other players.
+pub fn playerJump(world: gameobj.World) void {
+    if (world.player.ending != .playing) return;
+    const waiting = world.events orelse return;
+    const script = waiting.script;
+    const ready = &script.variables.ready;
+    if (ready.jump == .no and ready.warp == .no) return;
+    script.last_jumped = script.clock;
+    if (ready.jump != .no) {
+        ready.jump = .no;
+        events.readyToJump(world, false);
+    }
+    if (ready.warp != .no) {
+        ready.warp = .no;
+        events.readyToJump(world, true);
     }
 }
 

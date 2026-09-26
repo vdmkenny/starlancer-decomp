@@ -5,9 +5,9 @@
 //! describes it. **Unverified:** these functions lie between `loadout.cpp`'s code and
 //! `Executor.cpp`'s; by what they do they are the mission's.
 //!
-//! Not yet: the script's part tables (`mission_alloc_part_tables`, `mission_build_part_tables`)
-//! and its clock and start, which the script (#36) takes on; the trigger lists (`0x0045AE10`),
-//! the triggers' (#37); and the wings (`mission_wings_build`, #256).
+//! Elsewhere: the script's clock and start (`vm.Machine.start`), the watches of the proximity
+//! conditions (`0x0045AE10`), which the mission's events make as it starts
+//! (`events.Events.watch`), and the wings (`mission_wings_build`, `mission.buildWings`).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

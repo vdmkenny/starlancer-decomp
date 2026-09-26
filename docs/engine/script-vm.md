@@ -180,42 +180,138 @@ destroys the timer.
 
 ## Events
 
-The game queues events as they happen, in the `0x30`-byte records at `event_queue` (`0x52ABD8`):
-`event_post` (`0x0045B7C0`) for the ship alone, `event_post_group` (`0x0045B690`) for the ship, its
-flight group and the squads that hold it. `events_flush` (`0x0045B840`), which `mission_frame`
-calls once a frame, raises them all and empties the queue. Each carries a condition, up to five values, and a qualifier: the component of the ship
-the event concerns, by its index among the components of the ship's live object, or `0xFF` for the
-ship itself. A hit on a component queues ShotAt for the component and, except for hits of one kind,
-for the ship; destroying one queues Destroyed for the component.
+The game posts events as they happen to a queue of a thousand `0x30`-byte records at `event_queue`
+(`0x52ABD8`), `event_queue_count` (`0x005373E4`) of them waiting, which `init_mission`
+(`0x0045A4E0`) empties as a mission starts. Each names the ship it happened to, its condition, its
+values, and its qualifier: the component of the ship it concerns, by its index among the components
+of the ship's live object (`object_component_index`, `0x0045ADE0`), or `0xFF` for the ship itself.
 
-`trigger_match` (`0x0045CEA0`) handles an event on an object: its condition, its qualifier and the
-values it carries. It walks the triggers in the object's slice of the trigger list, and takes each
-one that is armed, has the event's condition and qualifier, links to a block and is not held back
-by a veto:
+- `event_post` (`0x0045B7C0`) takes an event for the ship's own triggers, where one of them would
+  answer it.
+- `event_post_group` (`0x0045B690`) takes one to be raised on the ship's flight group and on the
+  squads that hold it too, where a trigger would answer it: the ship's own, its flight group's, or a
+  squad's that holds the ship (`object_in_squad`, as the component the event concerns), in that
+  order, each group only where its slice holds triggers.
 
-1. It copies the event's values into a free thread's locals.
+Whether a trigger would answer is the matcher's test (`0x0045B4E0`, below), whatever the trigger's
+thread; like the matcher, the test has the object keep the event, and gives the event's values to
+the first free thread's locals for each trigger that answers. With a thousand events waiting, the
+game lists them and stops with the assertion "Trigger List exceeded" (`0x0045B330`).
+
+`events_flush` (`0x0045B840`), which `mission_frame` calls once a frame before `process_mission`,
+raises each event in turn on its ship's object (`trigger_raise_event`, `0x0045CE70`) and, where it
+was posted for them, on the ship's groups (`condition_raise`, below); then the queue is empty. An
+event that a trigger's thread posts as it runs at once waits its turn in the same pass.
+
+| Condition | Posted by | Values |
+|---|---|---|
+| ShotAt | `event_shot_at` (`0x0045A9E0`), with the groups: last in `object_damage` and in `object_armor_damage`, unless `0x00545860` holds it back; and in `component_damage`, for the ship but for damage of kind 4, and for the component struck | The attacker's ship, the ship's damage value twice, the ship, -1 |
+| Destroyed | `event_destroyed` (`0x0045AA60`), with the groups: as a ship's Explode begins (`0x004086F0`), and the limpet car's (`explode_limpet_car_init`); as a pilot ejects (`order_eject_init`, `order_eject_spin_init`); as a ship's hull is lost (`object_hull_lost`); and for each component `node_draw` takes out | The ship of what struck it last (`last_attacker`), the ship |
+| Launched | `event_launched` (`0x0045A9B0`), with the groups, as each launch style ends ([Launches](launch.md)) | The ship |
+| ObjectScooped | `0x0045AAD0`, with the groups, as Scoop Up has the pod aboard ([Ejection](ejection.md)) | The pod's ship |
+| ExplosionShip | `event_post_explosion` (`0x0045AB50`), with the groups, as the Uber Explode ends ([Effects](effects.md)) | The ship |
+| Cloaked, Decloaked | `object_cloak`, `object_uncloak` ([Cloak](cloak.md)) | None |
+| PlayerReadyToJump, PlayerReadyToWarp | `player_jump` (`0x00412B20`), on the player's ship | None |
+| CloseProximity, Proximity, ShipReached | The watches (below) | The ship close by; for the first two, how far, in the subject's radii |
+
+A hit by an object that stands for no mission's ship posts no ShotAt: an object stands for the
+mission's ship of its slot's index (`object_ship`, `0x0045A970`). `0x00545860` is set while
+`objects_collide` tests a ship against a hull again after a first hit, up to nine times, so that
+those knocks post no ShotAt; a shot at an object listing components, whose armour takes nothing of
+it, posts the ship's from `object_armor_damage` at once, whatever the flag. The component whose ShotAt a hit posts is
+the one the part struck counts against: the first component among the parts of its model of the
+part's group (SHP part `+0x108`, [SHP](../formats/shp.md)) where it has one, else of its assembly.
+
+`event_destroyed` has the ship's record note the loss: the ship's Destroyed flag, after which its
+own Destroyed is posted no more, or for a component, its bit of `intact_components` (bit `n & 31`)
+cleared.
+
+JUMP DRIVE (`player_jump`), while the mission goes on and the mission has a jump or a warp ready
+(`jump_ready`, `warp_ready`), notes the script's clock at `0x005373F4`, which `WhenPlayerLastJumped`
+counts from, and posts PlayerReadyToJump for each jump and PlayerReadyToWarp for each warp it takes,
+clearing it. **Unverified:** it first closes the target display's large form, or else its small one,
+where the words at `0x0057BEA8` and `0x0057BE44` hold 1 or 3; nothing writes them.
+
+### Matching
+
+`trigger_raise_event` raises an event on an object unless its ID is `0xFFFF`, then sets
+`condition_verdict` (`0x00525F84`) to 1 again. `trigger_match` (`0x0045CEA0`) first has the object
+keep the event, where the condition keeps its last one: the `0x28`-byte records at `event_values`,
+one for each object, hold ShotAt's five values, then Destroyed's, which `push_event_value` reads.
+Then it walks the triggers in the object's slice of the trigger list, and takes each that answers
+the event: armed, of the event's condition and qualifier, with a block to run, and, while
+`condition_verdict` is 0, of the repeat mode the condition exempts from a veto.
+
+1. It copies the event's values into the first free thread's locals.
 2. It checks the trigger's operands against the values: those the condition marks as checked, and
-   of those, the ones whose low halfword is not `0xFFFF`. A failed check skips the trigger.
-3. Unless a thread the trigger started is still running, it starts one on the trigger's block.
-4. It disarms the trigger as its repeat mode says.
+   of those, the ones whose low halfword is not `0xFFFF` (`trigger_check_operand`, below). A failed
+   check passes over the trigger, which stays armed.
+3. Unless a thread the trigger started is still running (`trigger_thread_running`, `0x0045D0D0`),
+   it starts that thread on the trigger's block, at once where the trigger's `+0x16` is 0, otherwise
+   for the scheduler, the thread keeping the trigger's index in a byte. A thread of the trigger
+   that waits for it (`InterruptTriggerCode`) runs on again instead.
+4. It disarms the trigger as its repeat mode says: `once` at once, `counted` once its count at
+   `+0x19` has run down, `always` never.
 
-A condition with a slot also has its last event kept for each object, in the `0x28`-byte records at
-`event_values`: ShotAt's five values, then Destroyed's. `push_event_value` reads them.
+`condition_raise` (`0x00453210`) raises an event that happened to a ship on the ship's flight group,
+then on each squad that holds the ship, as the component the event concerns, each only where its
+slice holds triggers. A group's event concerns the group itself (qualifier `0xFF`). For each group,
+the condition's handlers, where it has them, count its members: a flight group's ships, whole, or a
+squad's members (`0x004533D0`), a ship as the component its membership names, each ship of a flight
+group whole, and a squad's own members in turn. Their verdict becomes `condition_verdict` for the
+group's triggers.
 
-`condition_raise` (`0x00453210`) raises a group event on the ship's flight group and on the squads
-that hold the ship; a squad member that names a component counts only for events on that
-component. For ShotAt, Destroyed, Cloaked and Decloaked it first calls the condition's handlers:
-one before, one for each member of the group, and one for a verdict. A vetoed event fires only the
-triggers with the repeat mode the condition exempts.
+- **ShotAt** (`0x00452BB0`, `0x00452BD0`, `0x00452C00`): the handlers add up the members' damage
+  values twice over (`0x005294E6`, `0x0052950A`), and the group's event carries their average, over
+  the members counted, for both of its damage values; they never veto.
+- **Destroyed** (`0x00452C40`, `0x00452C50`, `0x00452CA0`): the verdict holds only once every
+  member is destroyed, or the component a squad names of it (`0x00525F7C`). Until then the event
+  fires only the group's triggers of repeat mode 1, which the condition exempts.
+- **Cloaked**, **Decloaked**: Destroyed's first and last handlers, with `cloak_group_add`
+  (`0x0045D800`), which does nothing, for each member, so every event goes ahead. Both are posted for
+  the ship alone, so the handlers never run.
 
-- **Destroyed:** the verdict holds only once every member, or the member's named component, is
-  destroyed. Until then the event fires only the group's triggers with repeat mode 1.
-- **ShotAt:** the handlers replace the two damage values with the members' average and never veto.
-- **Cloaked**, **Decloaked:** the handlers pass every event.
+A ship's damage value (`ship_damage_value`, `0x00452CB0`) is how much of its armour it has lost, in
+whole hundredths: its weakest quadrant's against the full armour of its type, six times its armour
+class ([Objects](objects.md)), or a component's own against what it starts with; 100 once any of it
+has run out, and for a component the ship lists no more.
 
-ShotAt's damage values both carry the victim's damage value (`ship_damage_value`, `0x00452CB0`): the
-lowest of the four armor values of the ship's [live object](objects.md), or the component's own,
-truncated. Its weapon value is always -1.
+### Watches
+
+As the mission's tables are made (`mission_bind_tables`), `0x0045AE10` lists a watch for each
+trigger of CloseProximity (`0x00536DD8`), Proximity (`0x00536758`) and ShipReached (`0x0052A5D0`),
+in the trigger list's order: the trigger, the object whose slice holds it (the first,
+`0x00453530`), and a flag, set. A trigger of the player's ship, the mission's first, watches the
+other players' ships too, with a watch on each. `SetTriggerState` sets and clears the flags of a
+trigger's watches as it arms and disarms the trigger (`0x0045B2D0`).
+
+Once the script's clock has ticked, after the timers (`process_mission`), `0x0045AF60` has the
+watches look for ships close by, each on a mission's ship that is not destroyed and whose object is
+no stand-in, while its flag is set:
+
+- CloseProximity's, once a ship, within 20 of the ship's radii (`0x004DC72C`).
+- Each of Proximity's within its trigger's second operand, a number of the ship's radii, where it is
+  set.
+- ShipReached's, once a ship, on a waypoint or a nav point (kinds `0x3E5` and 999), within 4000.
+
+`0x0045B170` looks: each other mission's ship, not destroyed and no stand-in, within the distance of
+the watching ship posts the watching ship's event for its own triggers (`event_post`), with the ship
+and, for the proximity conditions, how far it stands, in the watching ship's radii, truncated. The
+matcher never checks that distance (below), so a Proximity trigger answers the event of any of its
+object's watches.
+
+### The commands
+
+- `SetTriggerState` (`0x0045D300`, command `0x0F`) arms each trigger of the condition its second
+  argument names, in the slice of the object its first names, where the third is set, and disarms
+  it otherwise. Only the triggers of a component `push_component` named for the command answer, or
+  those of the object itself (`0x0045D910`); arming one gives it its count again, from `+0x1A`
+  (`trigger_set_armed`, `0x0045D390`). Its watches follow it.
+- `SetAnyTriggerState` (`0x0045D3A0`, command `0x4F`) does the same for the one trigger of that
+  condition the fourth argument numbers among the slice's, from 0, its count left as it stands.
+- `WhenPlayerLastJumped` (`0x00458580`, command `0x1E`) gives the seconds of the script's clock since
+  JUMP DRIVE last took a jump or a warp, at least 1; `0xFFFF` before the first, as the script's start
+  sets the time.
 
 ### Conditions
 
@@ -240,11 +336,13 @@ victim and the weapon; Destroyed the killer and the victim. The damage values se
 which no command parameter uses.
 
 Events pass ships as the addresses of their records, and the matcher turns a trigger's operands into
-the same form: the [mission format](../formats/dte.md#operands) gives the encoding.
-`trigger_check_operand` (`0x0045D810`) compares a number operand of the proximity conditions as an
-upper bound rather than for equality, but their distance value is not marked as checked, so the
-matcher never compares it. The catalogue is also generated into
-[`src/engine/vm/conditions.zig`](../../src/engine/vm/conditions.zig).
+the same form (`trigger_operand_value`, `0x004530A0`): the [mission format](../formats/dte.md#operands)
+gives the encoding. `trigger_check_operand` (`0x0045D810`) passes an operand for any ship on the
+players' ships alone, the records of the first `player_slots` ships; it compares a number operand of
+the proximity conditions as an upper bound rather than for equality, but their distance value is not
+marked as checked, so the matcher never compares it; and anything else must equal the value. An
+operand naming no ship, flight group or squad stops the game ("NULL entity referenced in script").
+The catalogue is also generated into [`src/engine/vm/conditions.zig`](../../src/engine/vm/conditions.zig).
 
 ## In OpenReliant
 
@@ -257,17 +355,23 @@ the commands that act on the game: `CreateFlightGroup` ([Missions](missions.md#t
 `WaitForJumpOrLaunch` ([Launches](launch.md#how-a-launch-is-given)), `SetInvulnerability`,
 `SetShipAvoidance`, the radio's `DisableTaunts` and `DisableGenericComms`, `PlayMusic`, the
 display's `OpenInstrument`, `CloseInstrument` and `SetObjective`, the space's
-`SetEnvironmentFXNebula` and `UpdateEnvironmentFXState`, `WaitForMovie` and
-`MultiplayerScriptSync`. They act on it through the world the mission's start and its frame give
+`SetEnvironmentFXNebula` and `UpdateEnvironmentFXState`, `WaitForMovie`, `MultiplayerScriptSync` and
+`WhenPlayerLastJumped`. They act on it through the world the mission's start and its frame give
 the machine, which the game reaches through its globals. A command not ported
 yet does nothing and gives 1, which lets the thread run on, and is logged the first time it runs
 ([#36](https://github.com/vdmkenny/openreliant/issues/36),
 [#281](https://github.com/vdmkenny/openreliant/issues/281)).
 
+[`vm/triggers.zig`](../../src/engine/vm/triggers.zig) matches the events to the triggers, raises
+them on the groups with the conditions' handlers, and holds `SetTriggerState` and
+`SetAnyTriggerState`; [`game/mission/events.zig`](../../src/engine/game/mission/events.zig) holds
+the queue, what posts each event, and the watches. The game's code posts its events through the
+world (`gameobj.World.events`).
+
 Where the game holds an address on a thread's stack, OpenReliant holds where the place lies in the
 mission image, which holds the script, its strings and every record a script names. The
 instruction pointer and a block's end are such places, and a frame is a place on the thread's own
-stack.
+stack; an event names a ship, a flight group or a squad so too.
 
 **Improvement:** the clock ticks from the game's own clock, once every 100 ticks the pause does not
 hold, in the place of a timer of its own.
@@ -280,7 +384,18 @@ part table past the mission's parts have no block, where the game leaves them as
 `for_each_ship` stops at a squad that holds itself round, which the game walks for ever, and passes
 over a member no record stands for, and a ship past the last object's slot.
 
+**Fix:** with a thousand events waiting, OpenReliant passes over the ones past them and logs it,
+where the game stops. An operand naming no ship, flight group or squad passes nothing, logged once,
+where the game stops. The matcher takes an object's slice of the trigger list as far as the object
+table and the list reach, where the game reads past them. The handlers' count of a squad passes over
+a member of a kind the game has no name for, where the game stops ("unknown ai group member"), and
+one no record stands for, and stops at a squad that holds itself round. Cloaking an object that
+stands for no mission's ship posts nothing, where the game faults. The watches' lists are as long as
+the mission needs, where the game writes them into tables of a fixed size without looking.
+
 Not ported: the script debugger, the table of curve weights `mission_script_start` fills
 (`0x00456F00`), and the ships the mission's sub-objects name, which it makes after the start part
 where the part has not (`0x004571D0`), with the sub-objects
-([#281](https://github.com/vdmkenny/openreliant/issues/281)).
+([#281](https://github.com/vdmkenny/openreliant/issues/281)); and the events that code OpenReliant
+does not run yet posts, such as JumpedIn from the jump orders
+([#307](https://github.com/vdmkenny/openreliant/issues/307)).

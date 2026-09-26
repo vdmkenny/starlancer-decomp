@@ -182,7 +182,12 @@ pub const Part = extern struct {
     /// What the part takes before it is destroyed, where it is a component: `node_add_part` gives
     /// its node this much armour. The Reliant's turrets hold 100 and its body 20000.
     component_armor: i32,
-    _reserved_108: [48]u8,
+    /// Parts sharing a non-zero group count a hit on any of them against the component among them,
+    /// which the mission's ShotAt names (`component_damage`); parts of none count it against
+    /// their assembly's (`link_id`). The Coalition's prototype gate's plates count against its
+    /// inner core so.
+    component_group: u32,
+    _reserved_10c: [44]u8,
 
     pub const Flags = packed struct(u32) {
         _unknown0: u1,
@@ -300,6 +305,7 @@ pub const Part = extern struct {
         assert(@offsetOf(Part, "turret_kind") == 0xF4);
         assert(@offsetOf(Part, "turret_slot") == 0xF8);
         assert(@offsetOf(Part, "component_armor") == 0x104);
+        assert(@offsetOf(Part, "component_group") == 0x108);
         assert(@sizeOf(Part) == 312);
     }
 };

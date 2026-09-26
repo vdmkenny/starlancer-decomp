@@ -66,6 +66,9 @@ const implementations = table: {
         .{ "SetObjective", setObjective },
         .{ "SetShipAvoidance", setShipAvoidance },
         .{ "MultiplayerScriptSync", multiplayerScriptSync },
+        .{ "SetTriggerState", vm.triggers.setTriggerState },
+        .{ "SetAnyTriggerState", vm.triggers.setAnyTriggerState },
+        .{ "WhenPlayerLastJumped", whenPlayerLastJumped },
     }) |pair| table[commandIndex(pair[0])] = pair[1];
     break :table table;
 };
@@ -496,6 +499,16 @@ fn multiplayerScriptSync(call: Call) u32 {
     return 1;
 }
 
+/// `cmd_WhenPlayerLastJumped` (`0x00458580`, command `0x1E`): how many seconds of the script's
+/// clock ago JUMP DRIVE last took a jump or a warp (`vm.Machine.last_jumped`), at least 1; and
+/// `never_jumped` while the clock stands before it, as it does before the first.
+fn whenPlayerLastJumped(call: Call) u32 {
+    const machine = call.machine;
+    const ago: i32 = @bitCast(machine.clock -% machine.last_jumped);
+    if (ago < 0) return vm.Machine.never_jumped;
+    return @max(@as(u32, @intCast(ago)), 1);
+}
+
 /// A command's implementation. `args` points at its first argument on the stack. The result is
 /// stored in `Thread.result`, and a zero result also ends the handler loop.
 pub const Command = Code("uint __fastcall (byte **ip, uint *args)");
@@ -513,6 +526,19 @@ test implementation {
     try std.testing.expect(implementation(commandIndex("Wait")) != null);
     try std.testing.expectEqual(null, implementation(commandIndex("PrintShipName")));
     try std.testing.expectEqual(null, implementation(0xFF));
+}
+
+test whenPlayerLastJumped {
+    var machine: vm.Machine = .{ .gpa = std.testing.allocator, .mission = undefined, .random = undefined };
+    const call: Call = .{ .machine = &machine, .thread = 0, .args = &.{} };
+    // Before the first jump, never.
+    machine.clock = 5;
+    try std.testing.expectEqual(vm.Machine.never_jumped, whenPlayerLastJumped(call));
+    // In the second of the jump, 1; then the seconds since.
+    machine.last_jumped = 5;
+    try std.testing.expectEqual(1, whenPlayerLastJumped(call));
+    machine.clock = 12;
+    try std.testing.expectEqual(7, whenPlayerLastJumped(call));
 }
 
 /// A mission ship record for the tests: in `group`, of `kind`, flown by `pilot`, launching from

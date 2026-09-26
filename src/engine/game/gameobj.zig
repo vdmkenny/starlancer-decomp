@@ -1465,6 +1465,9 @@ pub const World = struct {
     mission: ?*const @import("mission/bind.zig").Mission = null,
     /// What the mission's script asks of its space (`environfx.cpp`); null where nothing is drawn.
     environment: ?*@import("environfx.zig").Environment = null,
+    /// The mission's events, which the game's code posts as they happen for the script's triggers
+    /// (`mission.events`); null where no mission runs, as in a test.
+    events: ?*@import("mission/events.zig").Events = null,
 
     /// The ship types' stats and their models.
     pub const Spawn = struct {

@@ -213,6 +213,19 @@ pub const Machine = struct {
     walk_count: u8 = 0,
     /// `0x0052A1E0`: whether the ships `WaitForJumpOrLaunch` walks are still jumping or launching.
     still_moving: bool = false,
+    /// `condition_verdict` (`0x00525F84`): the condition's handlers' verdict on the event being
+    /// raised on a flight group or a squad (`vm.triggers.raiseOnGroups`). While it is false, only
+    /// the triggers of the repeat mode the condition exempts answer. Each event raised sets it
+    /// again, as the script's start does.
+    verdict: bool = true,
+    /// `0x005373F4`: the script's clock when JUMP DRIVE last took a jump or a warp the mission had
+    /// ready, which `WhenPlayerLastJumped` counts from; `never_jumped` until then.
+    last_jumped: u32 = never_jumped,
+    /// Whether a trigger's operand that names nothing has been logged.
+    named_nothing: bool = false,
+
+    /// `last_jumped` as the script starts.
+    pub const never_jumped: u32 = 0xFFFF;
 
     pub fn init(gpa: Allocator, mission: *bind.Mission, random: *libcmt.Rand) Machine {
         return .{ .gpa = gpa, .mission = mission, .random = random };
@@ -223,9 +236,10 @@ pub const Machine = struct {
     }
 
     /// `mission_script_start` (`0x0045CBC0`), as the mission's binding ends: every object's kept
-    /// events emptied, the clock, the timers, the threads and the tags reset, and the timers set
-    /// running. Then each start part runs, every object's triggers are armed, and each ship's
-    /// Destroyed flag is cleared and its components all intact.
+    /// events emptied, the clock, the timers, the threads and the tags reset, the handlers' verdict
+    /// and the last jump's time too, and the timers set running. Then each start part runs, every
+    /// object's triggers are armed, and each ship's Destroyed flag is cleared and its components
+    /// all intact.
     pub fn start(machine: *Machine) !void {
         const file = machine.mission.file;
         machine.gpa.free(machine.event_values);
@@ -234,6 +248,8 @@ pub const Machine = struct {
         @memset(machine.event_values, std.mem.zeroes(vm.ObjectEvents));
         machine._unknown_00537401 = 0xFF;
         machine.first_finished = false;
+        machine.last_jumped = never_jumped;
+        machine.verdict = true;
         machine.clock = 0;
         machine.timers = @splat(free_timer);
         machine.resetThreads();
@@ -263,9 +279,10 @@ pub const Machine = struct {
     }
 
     /// `vm_thread_start` (`0x0045B8D0`): starts a thread on `block`, the one at `into` or a free
-    /// one, which runs now unless `deferred`. None starts while 31 run, or on no block.
+    /// one, which runs now unless `deferred`, for the trigger `trigger` where one starts it. None
+    /// starts while 31 run, or on no block.
     /// **Fix:** the game takes a free thread past its pool where none is free.
-    fn startThread(machine: *Machine, block: ?u32, into: ?u8, deferred: bool, frame: ?u8, trigger: ?u8) ?u8 {
+    pub fn startThread(machine: *Machine, block: ?u32, into: ?u8, deferred: bool, frame: ?u8, trigger: ?u8) ?u8 {
         const at = block orelse return null;
         if (machine.thread_count + 1 >= vm.max_threads) return null;
         const index = into orelse machine.allocThread() orelse return null;
@@ -289,7 +306,7 @@ pub const Machine = struct {
     const no_trigger = 0xFF;
 
     /// `vm_thread_alloc` (`0x0045B960`): the first free thread, its stack emptied.
-    fn allocThread(machine: *Machine) ?u8 {
+    pub fn allocThread(machine: *Machine) ?u8 {
         for (&machine.threads, 0..) |*thread, index| {
             if (thread.ip != null) continue;
             thread.top = 0;
@@ -466,7 +483,25 @@ pub const Machine = struct {
         return null;
     }
 
+    /// `0x0045D910`: whether `component` is one that `push_component` named for the running
+    /// command's arguments, any of them; or, where it names none of them, the object itself
+    /// (`dte.Trigger.whole_object`).
+    pub fn tagged(machine: *const Machine, component: u8) bool {
+        for (machine.tags.tags[0..machine.tags.count]) |tag| {
+            if (tag.component == component) return true;
+        }
+        return component == dte.Trigger.whole_object;
+    }
+
     // --- The mission's records, as the script names them ------------------------------------
+
+    /// `0x00453200`: the object ID of the ship, flight group or squad whose record lies at
+    /// `place`, which the record starts with. **Fix:** the game reads it wherever `place` points;
+    /// OpenReliant gives none for none, and for a place outside the image.
+    pub fn objectId(machine: *Machine, place: u32) ?u16 {
+        if (place == 0 or place == none or place == no_record) return null;
+        return machine.halfword(place) catch null;
+    }
 
     /// `ship_index` (`0x004531C0`): the index among the mission's ships of the ship at `place`,
     /// the value the script names it by; null for none, zero, `none` or `0xFFFF`, which the game
@@ -571,10 +606,10 @@ pub const Machine = struct {
                         else => continue,
                     };
                     const component = try machine.byte(member + @offsetOf(dte.SquadMember, "component"));
-                    const tagged = component != dte.Trigger.whole_object;
-                    if (tagged) machine.tags.add(component, machine.threads[call.thread].top);
+                    const names_one = component != dte.Trigger.whole_object;
+                    if (names_one) machine.tags.add(component, machine.threads[call.thread].top);
                     try machine.walkShip(call, ship, each);
-                    if (tagged) machine.tags.pop();
+                    if (names_one) machine.tags.pop();
                 },
                 .flight_group => switch (record) {
                     .flight_group => |at| try machine.walkGroup(call, machine.recordPlace(.flight_groups, at), each),
@@ -910,7 +945,7 @@ pub const Machine = struct {
 
     /// `object_in_squad` (`0x00452AC0`): whether the object at `object` is a member of the squad at
     /// `squad`, as the component `tag`, or through a member that is a flight group or a squad.
-    fn inSquad(machine: *Machine, squad: u32, object: u32, tag: u8, depth: u8) Fault!bool {
+    pub fn inSquad(machine: *Machine, squad: u32, object: u32, tag: u8, depth: u8) Fault!bool {
         const squads = machine.mission.file.entry(.squads);
         if (depth > (try machine.records(dte.Squad, .squads)).len) return error.SquadCycle;
         const first = try machine.halfword(squad +% @offsetOf(dte.Squad, "first_member"));
@@ -965,7 +1000,7 @@ pub const Machine = struct {
 
     /// Where record `index` of a fixed-stride section lies, which the game pushes as the record's
     /// address, whether or not the section holds it.
-    fn recordPlace(machine: *const Machine, section: dte.Section, index: usize) u32 {
+    pub fn recordPlace(machine: *const Machine, section: dte.Section, index: usize) u32 {
         const stride = section.stride().?;
         return @truncate(machine.mission.file.entry(section).offset +% index * stride);
     }
@@ -1092,6 +1127,8 @@ pub const testing = struct {
         objects: []const dte.Object = &.{},
         squads: []const dte.Squad = &.{},
         squad_members: []const dte.SquadMember = &.{},
+        /// Each trigger's block is a part's, as `link` names it (`Fixture.link`).
+        triggers: []const dte.Trigger = &.{},
     };
 
     pub const Fixture = struct {
@@ -1132,6 +1169,7 @@ pub const testing = struct {
             section(&sections, .objects, records.objects.len, std.mem.sliceAsBytes(records.objects));
             section(&sections, .squads, records.squads.len, std.mem.sliceAsBytes(records.squads));
             section(&sections, .squad_members, records.squad_members.len, std.mem.sliceAsBytes(records.squad_members));
+            section(&sections, .triggers, records.triggers.len, std.mem.sliceAsBytes(records.triggers));
             const image = try write.write(gpa, &sections, .{});
             fixture.mission = try .bind(gpa, image);
             fixture.random = .{};
@@ -1141,6 +1179,14 @@ pub const testing = struct {
         pub fn deinit(fixture: *Fixture) void {
             fixture.machine.deinit();
             fixture.mission.deinit();
+        }
+
+        /// The `link` of a trigger whose block is that of part `index` of `parts`: where the part's
+        /// block lies in the script, in halfwords.
+        pub fn link(parts: []const Part, index: usize) u16 {
+            var at: usize = 0;
+            for (parts[0..index]) |part| at += part.code.len;
+            return @intCast(at / @sizeOf(u16));
         }
 
         /// Global `index`'s value.

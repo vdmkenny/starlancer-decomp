@@ -9,6 +9,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const dte = @import("../../formats/dte.zig");
 const shp = @import("../../formats/shp.zig");
 const math = @import("../surrender/math.zig");
 const Vector = math.Vector;
@@ -19,6 +20,7 @@ const Ending = @import("main.zig").Ending;
 const Context = aigeneric.Context;
 const camera = @import("camera.zig");
 const create = @import("create.zig");
+const events = @import("mission/events.zig");
 const explode = @import("explode.zig");
 const gameobj = @import("gameobj.zig");
 const guns = @import("guns.zig");
@@ -76,12 +78,10 @@ pub const Stage = enum(i32) {
 
 /// `order_eject_init` (`0x00415BD0`): the pilot ejects, where the ship has a cockpit to leave in:
 /// the first part at its root of that class, which leaves the ship as the pilot's pod
-/// (`separate`).
+/// (`separate`). The ship's Destroyed event is posted (`events.destroyed`).
 ///
-/// Not ported: the mission's Destroyed event
-/// ([#37](https://github.com/vdmkenny/openreliant/issues/37)); a wingman's call on the radio as the
-/// pilot ejects, and the rescue's word a thousand ticks later (`radio_wingman_ejected`,
-/// `0x00456D80`), which wait for the radio
+/// Not ported: a wingman's call on the radio as the pilot ejects, and the rescue's word a thousand
+/// ticks later (`radio_wingman_ejected`, `0x00456D80`), which wait for the radio
 /// ([#48](https://github.com/vdmkenny/openreliant/issues/48)); and a multiplayer game, in which
 /// nobody ejects so.
 pub fn init(ctx: Context, index: u16) void {
@@ -91,6 +91,7 @@ pub fn init(ctx: Context, index: u16) void {
         if (part.parent == null and part.class == .cockpit) break at;
     } else return;
     separate(ctx, index, cockpit);
+    events.destroyed(ctx.world, index, dte.Trigger.whole_object);
 }
 
 /// How long the pod takes to shoot clear of its ship (`0x00415BB5`), and to drift before the pilot
@@ -369,10 +370,8 @@ const abandoned_ticks = 200;
 const spin_most: f32 = 0.2;
 
 /// `order_eject_spin_init` (`0x004160D0`): an AI ship whose pilot is about to eject spins,
-/// unpowered, for `spin_ticks`, its pilot marked ejected.
-///
-/// Not ported: the mission's Destroyed event
-/// ([#37](https://github.com/vdmkenny/openreliant/issues/37)).
+/// unpowered, for `spin_ticks`, its pilot marked ejected, and its Destroyed event is posted
+/// (`events.destroyed`).
 pub fn spinInit(ctx: Context, index: u16) void {
     const slot = &ctx.world.objects.slots[index];
     const object = &slot.object;
@@ -381,6 +380,7 @@ pub fn spinInit(ctx: Context, index: u16) void {
     slot.state.eject.until = ctx.clock.frame_start + spin_ticks;
     // The roll is drawn first and the pitch last, as the game draws them.
     object.rotation = math.fromAngleVector(ctx.world.random.centredVector(@splat(spin_most)));
+    events.destroyed(ctx.world, index, dte.Trigger.whole_object);
 }
 
 /// `order_eject_spin` (`0x00416190`): once the spin is over, the pilot ejects (Eject), the pod

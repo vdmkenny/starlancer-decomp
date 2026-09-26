@@ -112,6 +112,7 @@ carries its own levels of detail.
 | `0xF4` | u32 | [Turret](../engine/guns.md#turrets) kind: 0 none, 1 aimed, 2 spinning, 3 missile turret |
 | `0xF8` | i32 | Which of its turret's parts it is, by turret kind; -1 for none |
 | `0x104` | i32 | What the part takes as a [component](../engine/objects.md#components) before it is destroyed, which `node_add_part` (`0x00499430`) gives its node. The Reliant's turrets hold 100 and its body 20000 |
+| `0x108` | u32 | Component group. Parts sharing a non-zero group count a hit on any of them against the component among them, which the mission's ShotAt names (`component_damage`, [Script VM](../engine/script-vm.md#events)); a part of none counts it against its assembly's. The Coalition's prototype gate's plates count against its inner core so |
 
 Part flags at `0xF0`:
 

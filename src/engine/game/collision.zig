@@ -7,9 +7,11 @@
 
 const std = @import("std");
 
+const dte = @import("../../formats/dte.zig");
 const math = @import("../surrender/math.zig");
 const Vector = math.Vector;
 const ai = @import("ai.zig");
+const events = @import("mission/events.zig");
 const aigeneric = @import("aigeneric.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
@@ -348,7 +350,8 @@ pub fn byDifficulty(world: gameobj.World, index: u16, kind: Kind, value: f32) f3
 ///
 /// With smart targeting on, a blow the player's ship deals, but by colliding, makes what it
 /// struck the player's target (`input.setPlayerTarget`). A blow the player's ship takes shakes it
-/// and its controller (`feedback`), and the display (`hud.Interference.start`).
+/// and its controller (`feedback`), and the display (`hud.Interference.start`). Last, the object's
+/// ShotAt is posted (`shotAt`).
 ///
 /// Not ported: the score a player's hit is worth, and what multiplayer makes of it.
 pub fn damage(world: gameobj.World, index: u16, struck: Quadrant, value: f32, factor: f32, attacker: u16, kind: Kind) void {
@@ -361,6 +364,20 @@ pub fn damage(world: gameobj.World, index: u16, struck: Quadrant, value: f32, fa
     if (held.* < 0) armorDamage(world, index, struck, through * factor, attacker, kind);
     object.last_attacker = .of(attacker);
     if (smartTargeting(world, attacker, kind)) |display| input.setPlayerTarget(display, all, @intCast(index), aigeneric.Target.whole, false);
+    shotAt(world, index, attacker);
+}
+
+/// The ShotAt of a blow to the object in slot `index` by `attacker`, on the object itself
+/// (`events.shotAt`), unless a collision's test against a hull runs again
+/// (`events.Events.shots_held`).
+fn shotAt(world: gameobj.World, index: u16, attacker: u16) void {
+    if (world.events) |waiting| if (waiting.shots_held) return;
+    events.shotAt(world, index, attacker, dte.Trigger.whole_object);
+}
+
+/// Holds back the ShotAt of the blows a collision deals, or lets it go again (`0x00545860`).
+fn holdShots(world: gameobj.World, held: bool) void {
+    if (world.events) |waiting| waiting.shots_held = held;
 }
 
 /// What `object_damage` and `object_armor_damage` both do first: a jumping object takes nothing,
@@ -401,7 +418,9 @@ fn smartTargeting(world: gameobj.World, attacker: u16, kind: Kind) ?*hud.State {
 /// target of its current order. A hit on that target brings up its form of the target display,
 /// and a hit on it or on the player's ship marks the quadrant struck for the ship status indicator
 /// to flash (`hud.State.target_hits`, `ship_hits`). A blow the player's ship takes shakes it and
-/// its controller (`feedback`), and the display (`hud.Interference.start`).
+/// its controller (`feedback`), and the display (`hud.Interference.start`). Last, the object's
+/// ShotAt is posted (`shotAt`); a shot's on an object listing components, at once, and even while a
+/// collision's test against a hull runs again.
 ///
 /// Not ported: what the player's hits on a friend tell the mission.
 pub fn armorDamage(world: gameobj.World, index: u16, struck: Quadrant, value: f32, attacker: u16, kind: Kind) void {
@@ -410,7 +429,7 @@ pub fn armorDamage(world: gameobj.World, index: u16, struck: Quadrant, value: f3
     const object = &slot.object;
     const scaled = scaledBlow(world, index, struck, value, kind, false) orelse return;
     if (object.flags.exploding) return;
-    if (kind == .bullet and object.flags.components) return;
+    if (kind == .bullet and object.flags.components) return events.shotAt(world, index, attacker, dte.Trigger.whole_object);
 
     const shielded = object.invulnerable.protects(attacker < all.players);
     const worn = byDifficulty(world, index, kind, scaled);
@@ -427,12 +446,14 @@ pub fn armorDamage(world: gameobj.World, index: u16, struck: Quadrant, value: f3
     if (armor.* < 0) ai.objectDestroyed(.{ .world = world, .clock = world.clock }, index, true, taken > heavy_blow);
     const current = &all.slots[all.player].orders[0].target;
     if (smartTargeting(world, attacker, kind) != null) current.index = @intCast(index);
-    const display = world.display orelse return;
-    if (current.slot() == index) {
-        _ = display.bringUp(hud.targetWindow(slot), false);
-        display.target_hits.insert(struck);
+    if (world.display) |display| {
+        if (current.slot() == index) {
+            _ = display.bringUp(hud.targetWindow(slot), false);
+            display.target_hits.insert(struck);
+        }
+        if (index == all.player) display.ship_hits.insert(struck);
     }
-    if (index == all.player) display.ship_hits.insert(struck);
+    shotAt(world, index, attacker);
 }
 
 /// A blow to the armour heavier than this leaves the player's ship no time to eject (`0x004DC44C`).
@@ -512,15 +533,36 @@ const shielded_hit: f32 = 1000;
 /// The part struck may be one of a model mounted on the object's: its assembly and its root are
 /// that model's.
 ///
+/// Last, whether or not the part took the hit, come the ShotAt events (`componentShotAt`).
+///
 /// Not ported: the invulnerability a component may carry, the score a player's hit is worth, and
 /// what multiplayer makes of it.
 pub fn componentDamage(world: gameobj.World, index: u16, struck_part: objects.PartRef, value: f32, attacker: u16, kind: Kind) void {
+    const object = &world.objects.slots[index].object;
+    if (object.flags.jumping or kind == .collision or struck_part.part().flags.damaged) return;
+    wearComponent(world, index, struck_part, value, attacker, kind);
+    componentShotAt(world, index, struck_part, attacker, kind);
+}
+
+/// `component_damage` (`0x00464A0A`)'s events for a hit on `struck_part`: the object's own ShotAt,
+/// but for a hit of kind `_unknown_4`, then the ShotAt of the component the part counts against
+/// (`objects.Model.countedAgainst`), where the object lists it (`create.Slot.componentIndex`), both
+/// even while a collision's test against a hull runs again.
+fn componentShotAt(world: gameobj.World, index: u16, struck_part: objects.PartRef, attacker: u16, kind: Kind) void {
+    if (kind != ._unknown_4) events.shotAt(world, index, attacker, dte.Trigger.whole_object);
+    const against = struck_part.model.countedAgainst(struck_part.index);
+    const component = world.objects.slots[index].componentIndex(against) orelse return;
+    events.shotAt(world, index, attacker, component);
+}
+
+/// What `component_damage` does to the component `struck_part` belongs to, as `componentDamage`
+/// describes it.
+fn wearComponent(world: gameobj.World, index: u16, struck_part: objects.PartRef, value: f32, attacker: u16, kind: Kind) void {
     const all = world.objects;
     const slot = &all.slots[index];
     const object = &slot.object;
     const model = struck_part.model;
     const component = struck_part.part();
-    if (object.flags.jumping or kind == .collision or component.flags.damaged) return;
     var share = byDifficulty(world, index, kind, value);
 
     // The assembly's first part that still has armour takes the hit.
@@ -567,8 +609,9 @@ fn counted(kind: Kind) bool {
 }
 
 /// `0x00465C50`: a ship that meets an object listing components is tested against that object's
-/// parts, not its sphere. The two are moved apart and tested again, up to nine times. Two objects
-/// that both list components pass through each other, as does anything meeting the limpet pod.
+/// parts, not its sphere. The two are moved apart and tested again, up to nine times, the tests
+/// after the first holding back the ShotAt of the knocks they deal (`holdShots`). Two objects that
+/// both list components pass through each other, as does anything meeting the limpet pod.
 fn parts(world: gameobj.World, first: u16, second: u16, pass: u8) bool {
     const all = world.objects;
     if (all.slots[first].object.flags.components and all.slots[second].object.flags.components) return false;
@@ -579,8 +622,11 @@ fn parts(world: gameobj.World, first: u16, second: u16, pass: u8) bool {
     var tries: u8 = 0;
     while (tries < hull_passes) : (tries += 1) {
         if (!hullHit(world, ship, hull, pass)) break;
+        holdShots(world, false);
         for ([_]u16{ ship, hull }) |index| motion.moveSlot(world, index);
+        holdShots(world, true);
     }
+    holdShots(world, false);
     return tries > 0 and tries < hull_passes;
 }
 

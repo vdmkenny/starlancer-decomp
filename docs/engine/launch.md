@@ -178,12 +178,11 @@ Not ported:
 
 - The other styles ([#304](https://github.com/vdmkenny/openreliant/issues/304)). A ship that
   launches in one rides its carrier's root while it waits, as every launching ship does, and is let
-  go where it stands as its style's steps would begin, passing through its carrier no more.
+  go where it stands as its style's steps would begin, passing through its carrier no more, its
+  Launched event posted as the style's end would post it.
 - The Kamov's LAUNCH MISSILE, which starts its torpedoes' launches
   ([#305](https://github.com/vdmkenny/openreliant/issues/305)), and a multiplayer game's
   ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
-- The Launched event each style's end queues (`event_launched`, `0x0045A9B0`,
-  [#37](https://github.com/vdmkenny/openreliant/issues/37)).
 - The radio's line as the player's launch goes (`0x00456E50`,
   [#48](https://github.com/vdmkenny/openreliant/issues/48)).
 - When the ship the player launched from explodes, the first Yamato among the objects takes its

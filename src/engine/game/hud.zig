@@ -1317,6 +1317,15 @@ pub const Objectives = struct {
         }
     }
 
+    /// The first of the objectives in the current state, which PRIMARY TARGET opens the window on
+    /// (`frame_controls`, `0x00414E57`); null for none.
+    pub fn current(objectives: *const Objectives) ?i16 {
+        for (objectives.states, 0..) |state, n| {
+            if (state == .current) return @intCast(n);
+        }
+        return null;
+    }
+
     /// `cmd_SetObjective` (`0x00459870`): objective `objective` of the mission takes state
     /// `state`, and one made current is the one the window shows. An objective past the ten, or a
     /// mission the table has no row for, changes nothing.
@@ -1719,6 +1728,9 @@ pub const State = struct {
     /// The chase view's pointer to the target this frame, where `drawTarget` has found it out of
     /// sight in the chase view; null where it doesn't show.
     chase_pointer: ?chase.Pointer = null,
+    /// How the chase view's pointer to the player's nav point is rolled this frame, where
+    /// `drawTarget` has found one in the chase view; null where it doesn't show.
+    chase_nav_roll: ?f32 = null,
     /// `player_ejected` (`0x00579986`), which the Eject Player order sets.
     ejected: bool = false,
     icons: Icons = .{},
@@ -3308,6 +3320,9 @@ pub const lead_gap: f32 = 5;
 /// The palette entries the arrow for a target out of sight is drawn in, the hostile one also the
 /// lead cursor's line's: red, and green.
 pub const line_colour: Sided(u8) = .{ .hostile = 0x26, .other = 0x62 };
+/// The palette entry the pointer to the player's nav point is drawn in (`hud_target`,
+/// `0x00489D9A`).
+pub const nav_colour: u8 = 0x2F;
 /// How far from the middle of the screen the arrow's tip and its base stand, and how far either
 /// side of its base its wings reach, in the display's own pixels (`0x004DC724`, `0x004DC788`,
 /// `0x004DC424`).
@@ -3371,9 +3386,11 @@ pub fn pointerDirection(ship: math.Place, at: Vector) [2]f32 {
 /// the lead cursor where to aim with the guns (`ai.leadAim`), which it keeps (`State.lead_point`),
 /// and a line from it toward the target, in red.
 ///
+/// First, where the player's ship points to a nav point (`GameObject.nav_point`), it draws the
+/// same arrow its way in `nav_colour`, whether the nav point is in sight or not, or in the chase
+/// view turns its pointer in the scene (`State.chase_nav_roll`).
+///
 /// Not yet ported: the corners it marks on the object the radio's window names (`0x0048B0F0`);
-/// the pointer to the next nav point (`GameObject.nav_point`), which needs the mission's
-/// ([#36](https://github.com/vdmkenny/openreliant/issues/36)), and its pointer in the chase view;
 /// the players' names over their ships in a multiplayer game.
 pub fn drawTarget(
     state: *State,
@@ -3387,10 +3404,19 @@ pub fn drawTarget(
     scale: f32,
 ) (spr.Error || Allocator.Error)!?[2]i32 {
     state.chase_pointer = null;
-    const index = state.target orelse return null;
+    state.chase_nav_roll = null;
     const all = scene.all;
     const sight = scene.sight;
     const ship = &all.slots[all.player];
+    if (ship.object.nav_point.index()) |nav| if (nav < all.slots.len) {
+        const way = pointerDirection(ship.drawn, all.slots[nav].drawn.position);
+        if (scene.mode == .chase) {
+            state.chase_nav_roll = chase.Pointer.rollToward(way);
+        } else {
+            drawArrow(target, sight, way, art.paletteColour(nav_colour), scale);
+        }
+    };
+    const index = state.target orelse return null;
     const struck = &all.slots[index];
     const hostile = struck.object.side == .hostile;
     var buffer: [16]u8 = undefined;
@@ -3493,6 +3519,38 @@ pub fn leadLine(aim: Point, toward: Point, lock: i32, scale: f32) ?[2]Point {
     return .{ from, from + (toward - from) * @as(Point, @splat((length - shortening) / length)) };
 }
 
+/// The arrow from the middle of the screen toward what lies `toward` from the player's ship: its tip
+/// `arrow_tip` out, and its wings `arrow_wing` either side of a point `arrow_back` nearer.
+const Arrow = struct {
+    tip: [2]i32,
+    wings: [2][2]i32,
+
+    fn toward(sight: Sight, way: [2]f32, scale: f32) Arrow {
+        const middle = sight.middle();
+        const across: [2]f32 = .{ -way[1], way[0] };
+        var arrow: Arrow = undefined;
+        for (0..2) |axis| {
+            const out = round(way[axis] * arrow_tip * scale);
+            const base = out - round(way[axis] * arrow_back * scale);
+            const wing = round(across[axis] * arrow_wing * scale);
+            arrow.tip[axis] = middle[axis] + out;
+            arrow.wings[0][axis] = middle[axis] + base + wing;
+            arrow.wings[1][axis] = middle[axis] + base - wing;
+        }
+        return arrow;
+    }
+};
+
+/// Draws the arrow `toward` in `colour`: from its tip to each wing, and across the wings.
+fn drawArrow(target: device.Device, sight: Sight, toward: [2]f32, colour: [4]f32, scale: f32) void {
+    const arrow: Arrow = .toward(sight, toward, scale);
+    const tip = arrow.tip;
+    const wings = arrow.wings;
+    for ([3][2][2]i32{ .{ tip, wings[0] }, .{ tip, wings[1] }, .{ wings[1], wings[0] } }) |ends| {
+        drawLine(target, pointOf(ends[0]), pointOf(ends[1]), colour, scale);
+    }
+}
+
 /// The arrow and the marker at the screen's edge for a target out of sight, which lies `toward`
 /// from the player's ship. The chase view draws no arrow.
 fn drawOffScreen(
@@ -3509,32 +3567,16 @@ fn drawOffScreen(
     colour: [4]f32,
     scale: f32,
 ) (spr.Error || Allocator.Error)!void {
-    const middle = sight.middle();
-    const across: [2]f32 = .{ -toward[1], toward[0] };
-    var tip: [2]i32 = undefined;
-    var wings: [2][2]i32 = undefined;
-    for (0..2) |axis| {
-        const out = round(toward[axis] * arrow_tip * scale);
-        const base = out - round(toward[axis] * arrow_back * scale);
-        const wing = round(across[axis] * arrow_wing * scale);
-        tip[axis] = middle[axis] + out;
-        wings[0][axis] = middle[axis] + base + wing;
-        wings[1][axis] = middle[axis] + base - wing;
-    }
-    if (mode != .chase) {
-        const line = art.paletteColour(line_colour.of(hostile));
-        for ([3][2][2]i32{ .{ tip, wings[0] }, .{ tip, wings[1] }, .{ wings[1], wings[0] } }) |ends| {
-            drawLine(target, pointOf(ends[0]), pointOf(ends[1]), line, scale);
-        }
-    }
+    if (mode != .chase) drawArrow(target, sight, toward, art.paletteColour(line_colour.of(hostile)), scale);
 
+    const arrow: Arrow = .toward(sight, toward, scale);
     const last = sight.last();
     var from: [2]i32 = switch (edge_line) {
-        .from_tip => tip,
-        .original => .{ tip[0], wings[0][0] },
+        .from_tip => arrow.tip,
+        .original => .{ arrow.tip[0], arrow.wings[0][0] },
     };
     var to: [2]i32 = undefined;
-    for (&to, middle, last, toward) |*c, m, most, way| c.* = m + round(@as(f32, @floatFromInt(most)) * way);
+    for (&to, sight.middle(), last, toward) |*c, m, most, way| c.* = m + round(@as(f32, @floatFromInt(most)) * way);
     _ = xtrabits.clipLine(last, &from, &to);
     const edge: Edge = .of(to, last);
     const spec = edge.spec();

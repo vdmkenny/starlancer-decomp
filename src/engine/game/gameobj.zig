@@ -806,8 +806,10 @@ pub const GameObject = extern struct {
     /// `nav_point_next` (`0x004152A0`), which passes on to the next the player's ship has not
     /// reached; none when created.
     nav_point: Slot,
-    /// **Unknown.** -1 when created.
-    _unknown_724: i32,
+    /// The object whose place the escort point's marker shows, set by the mission's
+    /// `SetEscortPoint` for the player's ship (`cmd_SetEscortPoint_ship`, `0x00459310`); none when
+    /// created.
+    escort_point: Slot,
     /// Where the power distribution stands on the power ball (`input.power`): a point within a disc
     /// of radius 64, in `x` and `y`. `z` is 1 when created, and moving the point sets it to 0.
     /// `create_object` puts the point at (1, 1).

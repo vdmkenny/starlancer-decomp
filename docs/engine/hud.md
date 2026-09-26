@@ -10,7 +10,7 @@ The display's elements as the game's manual names them, with where the code that
 
 | Element | Where | Key | Shows | Code |
 | --- | --- | --- | --- | --- |
-| Targeting cluster | middle | | the reticle where the guns aim; speed on an arc to the left, the speed the throttle sets and the speed the ship is making; the weapons' charge on an arc to the right; an indicator pointing to the next nav point, and one pointing to the target, red for hostile and green for friendly | [The targeting cluster](#the-targeting-cluster): the arcs, the two markers with their figures, the fills and the reticle. The indicator for the target is the arrow `hud_target` draws for a target out of sight ([The target](#the-target)); the nav point's is drawn the same way and not ported ([#36](https://github.com/vdmkenny/openreliant/issues/36)) |
+| Targeting cluster | middle | | the reticle where the guns aim; speed on an arc to the left, the speed the throttle sets and the speed the ship is making; the weapons' charge on an arc to the right; an indicator pointing to the next nav point, and one pointing to the target, red for hostile and green for friendly | [The targeting cluster](#the-targeting-cluster): the arcs, the two markers with their figures, the fills and the reticle. The indicator for the target is the arrow `hud_target` draws for a target out of sight, and the nav point's the same arrow ([The target](#the-target)) |
 | Target ring | round the target | | a ring round a target in sight, red or green, with its range in metres under it; a lead cursor, a box with a line trailing from it, where to shoot | `hud_target` (`0x00489C70`): brackets at the corners of the target's box, its range in kilometres, and the lead cursor with its line ([The target](#the-target)) |
 | Directional calipers | the display's edges | | the direction and range of a target out of sight | `hud_target`: a marker where a line toward the target leaves the screen, with the range ([The target](#the-target)) |
 | Missile lock ring | round the target | | a ring that closes in round the target and turns white once a missile has locked, with a tone | `hud_missile_lock` (`0x00491520`), whose count dims the target's brackets as a lock builds ([The lock](missiles.md#the-lock)) |
@@ -235,8 +235,8 @@ added to what is drawn, never culled and always drawn.
 | `chase_sight_near` (`0x005799E4`) | 600 | at full strength |
 | `chase_sight_far` (`0x00566780`) | 600 | by its own colours, half grey |
 | `chase_blind_mark` (`0x00566784`) | 600 | by its own colours, white |
-| `chase_target_pointer` (`0x0057BC58`) | 200, 400 below its middle | at full strength |
-| `chase_nav_pointer` (`0x005667AC`) | 200, 400 below its middle | at full strength, `chasepointat` |
+| `chase_target_pointer` (`0x0057BC58`) | 200, 400 above the point it turns about | at full strength |
+| `chase_nav_pointer` (`0x005667AC`) | 200, 400 above the point it turns about | at full strength, `chasepointat` |
 
 `camera_chase` stands the sight's squares 6000 and 12000 ahead of the player's ship, turned as it
 is. In view 0 in the chase mode, `hud_missile_lock` gives the two squares `chasetarget2` while
@@ -248,13 +248,13 @@ fire aims.
 
 `hud_target` hides both pointers each frame. In the chase mode, for the target out of sight, and
 for the nav point, it shows the pointer and turns it as the ship is and then about its nose by the
-way's angle from straight up, going round to the right, and half a turn more (`chase_pointer_roll`,
-`0x00566788`, worked out a quadrant at a time with `sr_atan`), with `chasepointat2` for a hostile
-target and `chasepointat3` for the rest.
+angle from straight up, going round to the right, of the way `hud_pointer_direction` gives, and
+half a turn more (`chase_pointer_roll`, `0x00566788`, worked out a quadrant at a time with
+`sr_atan`), with `chasepointat2` for a hostile target and `chasepointat3` for the rest. That way is
+the way to what it points to turned half round, so the pointer stands that side of the middle.
 
-OpenReliant draws them (`hud.chase`). **Improvement:** it computes the pointer's angle with
-`atan2`. Not ported: the nav point's pointer, which needs the nav points
-([#36](https://github.com/vdmkenny/openreliant/issues/36)).
+OpenReliant draws them (`hud.chase`). **Improvement:** it computes the pointers' angle with
+`atan2`.
 
 ## The target
 
@@ -299,9 +299,12 @@ component goes. With none to be found the player is left without a target.
 target that lists components and is not friendly, it opens the target's form if it is shut and
 steps the component round to the next that is targetable and not hidden, or to none.
 
-PRIMARY TARGET (`frame_controls`) makes the mission's primary target (`primary_target`,
-`0x005883DC`) the player's, which needs the mission's script; it is not ported yet
-([#36](https://github.com/vdmkenny/openreliant/issues/36)).
+PRIMARY TARGET (`frame_controls`, `0x00414E04`), where the mission's script has named a primary
+target (`primary_target`, `0x005883DC`, `SetPrimaryTarget`), makes it the player's target
+(`player_target_set`), and opens the objectives window, not held, on the first objective whose
+state is current ([The objectives](#the-objectives)); with none, it plays sound 3. **Fix:** in
+mission 25's second part the game looks for the current objective among the first part's; OpenReliant
+looks among the second part's, which the window shows.
 
 Smart targeting answers the player's hits. A blow of the player's ship, except by colliding, to an
 object's shields makes the object the player's target (`object_damage`). One to its armour makes
@@ -313,8 +316,11 @@ component the subtarget, where the ship lists it, or else the ship the target
 ### Drawing it
 
 `hud_target` (`0x00489C70`), which `hud_draw` runs in view 0 between the jump prompt and the eject
-marker, draws the target. Where its node (`ai_target_node`: the component's for a subtarget) stands
-off the screen or behind the camera:
+marker, first points to the player's nav point, where `nav_point_next` has found one it strays
+from ([The flyback markers](#the-flyback-markers)): the arrow below, the nav point's way, in
+palette entry `0x2F` (`0x1F` on the software renderer), wherever the nav point stands, or in the
+chase mode its pointer in the scene. Then it draws the target. Where its node (`ai_target_node`:
+the component's for a subtarget) stands off the screen or behind the camera:
 
 - an arrow from the middle of the screen, pointing the way to the node in the player's ship's
   frame (`hud_pointer_direction`, `0x00489BC0`): three lines, the tip 32 from the middle and the
@@ -352,10 +358,22 @@ on the side edges than the target lies, and the more the wider the window. OpenR
 line at the arrow's tip. `--original` starts it where the game does.
 
 Not ported: the corners `hud_comms_marker` (`0x0048B0F0`) marks on the object the radio's window
-names; the pointer to the nav point; the players' names over their ships in a multiplayer game;
+names; the players' names over their ships in a multiplayer game;
 and what `hud_target_keys` does while the radio's window is open, or while `0x00529FB8` is set,
 which leaves out every key after the search under the reticle. The keys' sounds are in
 [The display's sounds](#the-displays-sounds).
+
+### The flyback markers
+
+A mission's script marks objects for the player to fly back to with `SetFlybackMarker` (command
+`0x46`), each with a reach: `nav_points` (`0x0051CF3C`) and `nav_point_reaches` (`0x0051CF08`),
+`nav_point_count` (`0x0051CF38`) of them, ten at most, which the command sets afresh.
+`ResetFlybackMarker` (`0x47`) drops them and points the player's ship to none, and `hud_init` drops
+them as each mission loads. Once a frame, before its work, `mission_frame` runs `nav_point_next`
+(`0x004152A0`): the player's ship points to the first marker it stands farther from than the
+marker's reach (`GameObject.nav_point`, `+0x720`), or to none, and a marker whose object has become
+a stand-in is dropped for good. **Fix:** past the tenth marker the game stops with the assertion
+"Run out of flyback markers"; OpenReliant marks no more.
 
 ## The ship status indicator
 
@@ -590,8 +608,8 @@ OpenReliant plays it as the key is pressed.
 a warning playing as the view changes loops until the player looks ahead again. OpenReliant runs it
 in every view, the light counting as out in the others.
 
-Not yet ported: PRIMARY TARGET ([#98](https://github.com/vdmkenny/openreliant/issues/98)) and the
-radio's menu ([#99](https://github.com/vdmkenny/openreliant/issues/99)), with their sounds.
+Not yet ported: the radio's menu ([#99](https://github.com/vdmkenny/openreliant/issues/99)), with
+its sounds.
 
 ## The jump prompt, the eject marker and the scanner
 

@@ -432,6 +432,7 @@ pub fn controlsFrame(controls: Controls) void {
         .game_ticks = clock.game_ticks,
         .multiplayer = false,
         .world = world,
+        .all = all,
     });
     const cockpit_input: ?camera.Cockpit.Input = if (controls.cockpit) |shown| moved: {
         const live = &slot.object;
@@ -470,7 +471,8 @@ pub fn controlsFrame(controls: Controls) void {
     devices.joystick.rumble(controls.forces.motors(clock.frame_start));
 }
 
-/// `mission_frame` (`0x004924B0`), as far as the objects go: the player's ship uncloaked where
+/// `mission_frame` (`0x004924B0`), as far as the objects go: the player's ship pointed to the
+/// flyback marker it has strayed from (`input.nextNavPoint`), then the player's ship uncloaked where
 /// the display ran the cloak's charge dry last frame (`hud.State.uncloakSpent`), then every
 /// object's orders, which fly the ships and read the player's controls, then the frames they are
 /// drawn at, then the missiles (`missiles.frame`) and the shots in flight (`guns.bulletsFrame`),
@@ -490,6 +492,7 @@ pub fn controlsFrame(controls: Controls) void {
 /// Whether the mission is over: as the camera has it (`missionOver`), which sets the script's
 /// `mission_over`, or as the script has it, which ends the mission before the frame's work.
 pub fn missionFrame(orders: aigeneric.Context, timing: objects.Timing, loaded: ?*Loaded) bool {
+    input.nextNavPoint(orders.world);
     const over = missionOver(orders.world);
     const player = orders.world.player;
     if (loaded) |playing| {
@@ -692,7 +695,7 @@ pub fn drawFrame(gpa: Allocator, arena: Allocator, scene: *srcore.Scene, context
     if (frame.chase) |seen_behind| if (frame.display) |display| if (frame.view == .cockpit and frame.cockpit_mode == .chase) {
         const ship = &frame.objects.slots[frame.objects.player];
         const aim: ?math.Vector = if (ship.object.blind_fire_aim != 0) display.lead_point else null;
-        try seen_behind.draw(gpa, scene, ship.drawn, display.reticle_bright, aim, display.chase_pointer);
+        try seen_behind.draw(gpa, scene, ship.drawn, display.reticle_bright, aim, display.chase_pointer, display.chase_nav_roll);
     };
     if (frame.shields) |bubbles| try bubbles.draw(gpa, arena, scene, frame.objects, .{
         .camera = attachments.camera,
@@ -1379,14 +1382,14 @@ const camera_marker_at: math.Vector = .{ 0, 0, -8000 };
 /// (`0x004934F0`), for the mission `image`, made in `gpa`, which the mission then owns, played as
 /// mission `number`. Returns the mission loaded for play, which the caller destroys once it ends.
 ///
-/// The loading readies the display's objectives and the launch's caption for the mission
-/// (`hud_init`), empties the effects' pools and the missiles in flight, puts a stand-in in every
-/// object's slot (`create.Objects.reset`), loads the Turret Flak's shell and the debris
-/// (`guns_load_shell`, `explosions_init`), and clears the mark of the player's ship jumping in
-/// (`jump_init`). Then the start:
+/// The loading readies the display's objectives and the launch's caption for the mission, and drops
+/// the flyback markers (`hud_init`), empties the effects' pools and the missiles in flight, puts a
+/// stand-in in every object's slot (`create.Objects.reset`), loads the Turret Flak's shell and the
+/// debris (`guns_load_shell`, `explosions_init`), and clears the mark of the player's ship jumping
+/// in (`jump_init`). Then the start:
 /// 1. ends the 3D sounds, has the mission play with everything shown, no ship the player launched
-///    from, the camera in the cockpit mode the options' setting picks and the ejected pilot always
-///    picked up, and puts back the pilot's kills (`winmain.startMission`);
+///    from, no primary target, the camera in the cockpit mode the options' setting picks and the
+///    ejected pilot always picked up, and puts back the pilot's kills (`winmain.startMission`);
 /// 2. binds the mission, whose records the orders then reach (`gameobj.World.mission`), and starts
 ///    its script (`mission.Loaded.start`), whose start part makes the mission's first ships and
 ///    gives them their orders, a launch among them;
@@ -1439,6 +1442,8 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     world.player.carrier = null;
     world.player.cutaway = .none;
     world.player.jumping_in = false;
+    world.player.flyback = .{};
+    world.player.primary_target = null;
     if (world.camera) |view| view.cockpit_mode = view.setting.mode();
     winmain.startMission(world.player);
     all.mission_number = number;

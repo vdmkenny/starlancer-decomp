@@ -571,8 +571,8 @@ address	kind	name	type	comment
 00515d88	data	player_wing	short[6]	The slots of the player's wing, -1 for none, as mission_wings_build lists it with mission_start putting the player's first: the ships the wing status window shows and the radio's orders go to
 00515d94	data	wing_third	short[6]	The mission's third wing, as mission_wings_build lists it. Nothing reads it
 004f8890	data	wing_icons	short[48]	Pairs of a ship type and the shape the wing status window shows it by, which mission_start gives each ship of the player's wing: the twelve ships the player can fly and their twins
-00515d74	data	action_sphere_radius	float	The action sphere's radius: 220000
-00515d78	data	action_sphere_center		The object the action sphere is around, which fighters away from the fight return to
+00515d74	data	action_sphere_radius	float	The action sphere's radius: 220000 from the AI's setup, and where SetActionCentre gives none
+00515d78	data	action_sphere_center	short	The object the action sphere is around, which fighters away from the fight return to; SetActionCentre moves it
 0040a3a0	function	fight_choose_maneuver	void __fastcall (int slot)	Chooses the Fight order's next maneuver into its entry's data: by the matchup, then its length
 0040a000	function	fight_choose_by_position	bool __fastcall (int slot, FightData *data, OrderEntry *entry)	Chooses between fighters: pursue when far, run away when close, else from maneuver_choices by where the two ships are
 0040a220	function	fight_choose_against_massive	void __fastcall (int slot, FightData *data)	Attack massive object, for 20000 ticks, against a target with components
@@ -1210,9 +1210,9 @@ address	kind	name	type	comment
 0057dfbc	data	missile_lock_count	int	The missile lock's count: 100 while no lock builds, down by the frame's ticks to 0 as one does, and back up as it is lost. hud_target draws the brackets at its hundredths of their brightness, none at a tenth or less, and shortens the lead cursor's line by 0.28 for each short of 100
 00501cb4	data	pick_range	float	330000: the targeting keys reach twice as far from the player's ship
 0057c260	data	hud_lead_point	Vec3	Where hud_target's lead cursor aims, which the player's guns aim at while blind fire does
-0051cf38	data	nav_point_count	int	The mission's nav points
-0051cf3c	data	nav_points	int	The first of the objects of the mission's nav points, nav_point_count of them, -1 for one gone
-0051cf08	data	nav_point_reaches	float[12]	How near the player's ship comes to each nav point for nav_point_next to pass on from it
+0051cf38	data	nav_point_count	int	How many flyback markers the mission's script has set (SetFlybackMarker), ten at most; hud_init clears it
+0051cf3c	data	nav_points	int[10]	The flyback markers' objects, nav_point_count of them, -1 for one gone
+0051cf08	data	nav_point_reaches	float[10]	How far the player's ship may stray from each flyback marker before nav_point_next points it back there: SetFlybackMarker's reach
 005799e4	data	chase_sight_near	void *	The chase view's near sight, a 600 square of chasetarget at full strength, which camera_chase stands 6000 ahead of the player's ship
 00566780	data	chase_sight_far	void *	The chase view's far sight, a 600 square of chasetarget half grey, which camera_chase stands 12000 ahead of the player's ship
 00566784	data	chase_blind_mark	void *	The chase view's mark of where blind fire aims, a 600 square, white, which hud_missile_lock stands 6000 from the ship toward hud_lead_point while blind fire aims
@@ -1228,7 +1228,7 @@ address	kind	name	type	comment
 00594648	data	neutral_text_colours	byte[256]	As text_colours: hud_target's range for a neutral target
 00563160	data	ship_status_hits	byte[4]	A flag for each quadrant of the player's ship whose armour a hit wore (object_armor_damage), which hud_ship_status flashes on the schematic as shapes 1 to 4 and clears
 005635d4	data	target_status_hits	byte[4]	A flag for each quadrant of the target of the player's current order whose armour a hit wore (object_armor_damage), for the target display
-005883dc	data	primary_target	OrderTarget	The mission's primary target, index and component, which PRIMARY TARGET makes the player's; -1 in both for none
+005883dc	data	primary_target	short[2]	The mission's primary target, the object's index then its component, -1 in both for none: SetPrimaryTarget sets it, PRIMARY TARGET makes it the player's, and mission_start clears it
 00480c40	function	sprite_block	void * __fastcall (void *set, int index)	The address of block index of a loaded sprite set: its directory entry's offset from the set's start. hud_target hands palette_to_vfx the display's palette block this way
 00455d40	function	comms_menu_run	void (void)	Runs the radio's menu while its window is open, which hud_target_keys calls first: by the page at 0x00529530, sets the page's title string at 0x00529FB4 and runs its keys
 00474e00	function	player_friend_destroyed	void __fastcall (int told)	Sets +0x678 of the player's ship to 1, or to 2 and sends it in a multiplayer game when told is 1: object_armor_damage and component_damage call it as the player's shot destroys a friend or a friend's component
@@ -1603,3 +1603,9 @@ address	kind	name	type	comment
 005023d6	data	mission_dates	short[29]	The language string of each mission's date, which the launch types out: 0 for mission 0, then missions 1 to 28
 004e3c98	data	launch_styles		The launch styles' routines, 24 bytes a style: init, update, two nulls, 0x00515D70 and a null
 0052a1e0	data	wait_still_moving	byte	Set by WaitForJumpOrLaunch's walk where a ship still jumps, warps or launches
+00468920	function	escort_marker_init	void (void)	Builds the escort point's marker as a mission runs: its mesh (escort_marker_mesh) and scene object (escort_marker)
+00468ce0	function	escort_marker_free	void (void)	Frees the escort point's marker as the mission ends
+00468d00	function	escort_marker_frame	void (void)	Once a frame, where the player's ship has an escort point (+0x724, SetEscortPoint): places the marker on it, drawn no farther from the camera than a set reach, pulses its colours in bands over 300 ticks, and shows it in the cockpit views
+0054d100	data	escort_marker_clock	int	The ticks the escort point's marker pulses by, 0 to 299
+0054d104	data	escort_marker_mesh	void *	The escort point's marker's mesh
+0054d108	data	escort_marker	void *	The escort point's marker's scene object

@@ -5,6 +5,7 @@
 //! `airipper.cpp`'s and `jump.cpp`'s.
 
 const std = @import("std");
+const log = std.log.scoped(.input);
 const assert = std.debug.assert;
 
 pub const controls = @import("input/controls.zig");
@@ -1000,6 +1001,13 @@ pub const Player = struct {
     /// (`srstars.Field.shortened`); the loading before a mission's start clears it (`jump_init`,
     /// `0x00416490`).
     jumping_in: bool = false,
+    /// The flyback markers the mission's script sets, which point the player's ship back to what it
+    /// strays from (`nextNavPoint`).
+    flyback: Flyback = .{},
+    /// `primary_target` (`0x005883DC`): the mission's primary target, which its script names
+    /// (`SetPrimaryTarget`) and PRIMARY TARGET makes the player's target; none from the mission's
+    /// start (`mission_start`, `0x004935C9`).
+    primary_target: ?PrimaryTarget = null,
     /// What the radio leaves unsaid, as a mission's script asks: the enemy's taunts
     /// (`DisableTaunts`, `0x00529CB4`), and the remarks the game makes by itself, on a kill, a ship
     /// lost, a missile coming or a launch (`DisableGenericComms`, `0x00529538`). The radio's lines,
@@ -1011,6 +1019,12 @@ pub const Player = struct {
     rescue_odds: @import("game/aieject.zig").RescueOdds = .{},
     /// The pilot's kills over the whole campaign.
     kills: Kills = .{},
+
+    /// A mission's primary target: a ship's slot, and one of its components or the whole ship.
+    pub const PrimaryTarget = struct {
+        index: u16,
+        component: ?u8 = null,
+    };
 
     /// The pilot's kills over the whole campaign. Only a new pilot starts them again from 0.
     pub const Kills = struct {
@@ -1301,6 +1315,88 @@ pub fn setPlayerTarget(display: *hud.State, all: *create.Objects, index: i16, co
     entry.target.index = index;
     entry.target.component = component;
     display.targetChanged(all, multiplayer);
+}
+
+// --- The flyback markers -----------------------------------------------------------------------
+
+/// The flyback markers a mission's script sets (`SetFlybackMarker`): objects the display points the
+/// player's ship back to once it strays farther from one than its reach (`nextNavPoint`). The game
+/// keeps them in `nav_points` (`0x0051CF3C`), `nav_point_reaches` (`0x0051CF08`) and
+/// `nav_point_count` (`0x0051CF38`), ten at most; the loading before a mission's start drops them
+/// (`hud_init`, `0x00483F31`).
+pub const Flyback = struct {
+    markers: [capacity]Marker = @splat(.{}),
+    count: u8 = 0,
+
+    pub const capacity = 10;
+
+    /// An object's slot, none once the object has gone, and how far from it the player's ship may
+    /// stray before the display points back to it.
+    pub const Marker = struct {
+        slot: ?u16 = null,
+        reach: f32 = 0,
+    };
+
+    /// Marks the object in `slot`, `reach` about it (`cmd_SetFlybackMarker_ship`, `0x00459960`).
+    ///
+    /// **Fix:** past the tenth the game stops with the assertion "Run out of flyback markers";
+    /// OpenReliant marks no more.
+    pub fn mark(flyback: *Flyback, slot: u16, reach: f32) void {
+        if (flyback.count >= capacity) {
+            log.warn("the flyback marker on object {d} is left out: there are {d} already", .{ slot, capacity });
+            return;
+        }
+        flyback.markers[flyback.count] = .{ .slot = slot, .reach = reach };
+        flyback.count += 1;
+    }
+};
+
+/// `nav_point_next` (`0x004152A0`), once a frame before the mission's work (`mission_frame`): the
+/// player's ship points to the first flyback marker it stands farther from than the marker's reach
+/// (`GameObject.nav_point`), which the display draws its pointer to, or to none. A marker whose
+/// object has become a stand-in is dropped for good.
+pub fn nextNavPoint(world: gameobj.World) void {
+    const all = world.objects;
+    const flyback = &world.player.flyback;
+    const ship = &all.slots[all.player];
+    ship.object.nav_point = for (flyback.markers[0..flyback.count]) |*marker| {
+        const index = marker.slot orelse continue;
+        const marked = &all.slots[index];
+        if (marked.object.type == .stand_in) {
+            marker.slot = null;
+            continue;
+        }
+        if (math.distance(marked.drawn.position, ship.drawn.position) > marker.reach) break .of(index);
+    } else .none;
+}
+
+test nextNavPoint {
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(std.testing.allocator);
+    defer mission.deinit();
+    const player = try mission.add(.predator, @splat(0));
+    const near = try mission.add(.predator, .{ 0, 0, 1000 });
+    const far = try mission.add(.predator, .{ 0, 0, 50000 });
+    // With no markers, the ship points nowhere.
+    nextNavPoint(mission.world());
+    try std.testing.expectEqual(.none, mission.slot(player).object.nav_point);
+    // Within the first marker's reach, it points to the next it has strayed from.
+    mission.player.flyback.mark(near, 5000);
+    mission.player.flyback.mark(far, 20000);
+    nextNavPoint(mission.world());
+    try std.testing.expectEqual(gameobj.Slot.of(far), mission.slot(player).object.nav_point);
+    // Once the first is out of reach, it points there first.
+    mission.player.flyback.markers[0].reach = 500;
+    nextNavPoint(mission.world());
+    try std.testing.expectEqual(gameobj.Slot.of(near), mission.slot(player).object.nav_point);
+    // A marker whose object has gone is dropped.
+    mission.slot(near).object.type = .stand_in;
+    nextNavPoint(mission.world());
+    try std.testing.expectEqual(null, mission.player.flyback.markers[0].slot);
+    try std.testing.expectEqual(gameobj.Slot.of(far), mission.slot(player).object.nav_point);
+    // Past the tenth, no more are marked.
+    for (0..Flyback.capacity) |_| mission.player.flyback.mark(far, 1);
+    try std.testing.expectEqual(Flyback.capacity, mission.player.flyback.count);
 }
 
 /// FIRE LASERS, LAUNCH MISSILE, CLOAK SHIP, JUMP DRIVE, EJECT and COUNTERMEASURES, which
@@ -1757,6 +1853,9 @@ pub const FrameKeys = struct {
     multiplayer: bool,
     /// The world the keys' sounds are heard in; null where nothing is heard.
     world: ?gameobj.World = null,
+    /// The objects, among which PRIMARY TARGET aims the player; null where there are none, as in
+    /// a test.
+    all: ?*create.Objects = null,
 };
 
 /// Betty's word as a device turns on and as it turns off.
@@ -1790,6 +1889,7 @@ const cloak_said: Said = .{ .on = .cloak_on, .off = .cloak_off };
 ///   and opens the gunnery window, held while SHIFT is down, which a joystick button bound to it
 ///   can be pressed with; its key, which takes no modifier, is read only while SHIFT is up.
 /// - OBJECTIVES WINDOW closes the wing status window and opens the objectives.
+/// - PRIMARY TARGET makes the mission's primary target the player's (`primaryTarget`).
 /// - SHIELD BALANCING held lets the stick shift the shields fore and aft, sounding as it is first
 ///   held.
 /// - RADAR RANGES moves the radar to its next range, in the view ahead with its rings still.
@@ -1807,7 +1907,7 @@ const cloak_said: Said = .{ .on = .cloak_on, .off = .cloak_off };
 /// OpenReliant's frame rates make a din; OpenReliant sounds it as it is pressed.
 ///
 /// Not yet ported: the radio's menu COMMS WINDOW starts; OBJECTIVES WINDOW paging through the
-/// objectives once they are open; PRIMARY TARGET and the orders to the wingmen.
+/// objectives once they are open; and the orders to the wingmen.
 pub fn frameKeys(keys: FrameKeys) void {
     const display = keys.display;
     const player = keys.player;
@@ -1885,6 +1985,7 @@ pub fn frameKeys(keys: FrameKeys) void {
         if (windows.up(.wing_status)) windows.close(.wing_status);
         if (windows.status.get(.objectives).phase != .open) _ = windows.open(.objectives, multiplayer);
     }
+    if (devices.active(.primary_target, true)) primaryTarget(keys);
     const balancing = devices.active(.shield_balancing, false);
     if (balancing and !player.balancing_shields) hud.beep(keys.world, .done);
     player.balancing_shields = balancing;
@@ -1919,6 +2020,48 @@ pub fn frameKeys(keys: FrameKeys) void {
         betty.sayIn(keys.world, spectral_shields_said.of(on));
         setSpectralShields(display, object, on);
     }
+}
+
+/// PRIMARY TARGET (`frame_controls`, `0x00414E04`): the mission's primary target, where its script
+/// has named one (`Player.primary_target`), becomes the player's target (`setPlayerTarget`), with
+/// the display's `done`, and the objectives window opens, not held, on the current objective
+/// (`hud.Objectives.current`); with none, the display sounds `refused`.
+fn primaryTarget(keys: FrameKeys) void {
+    const primary = keys.player.primary_target orelse return hud.beep(keys.world, .refused);
+    hud.beep(keys.world, .done);
+    const display = keys.display;
+    if (keys.all) |all| {
+        const component: i16 = if (primary.component) |part| part else aigeneric.Target.whole;
+        setPlayerTarget(display, all, @intCast(primary.index), component, keys.multiplayer);
+    }
+    if (display.objectives.current()) |current| display.objectives.shown = current;
+    const windows = &display.windows;
+    if (windows.open(.objectives, keys.multiplayer)) windows.status.getPtr(.objectives).held = false;
+}
+
+test primaryTarget {
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(std.testing.allocator);
+    defer mission.deinit();
+    const player = try mission.add(.predator, @splat(0));
+    const target = try mission.add(.predator, .{ 0, 0, 5000 });
+    _ = try aigeneric.push(mission.orders(), player, .player_control, .none);
+    var devices: Devices = .{};
+    var display: hud.State = .{};
+    display.objectives.reset(1, false);
+    display.objectives.set(0, .listed);
+    display.objectives.set(2, .current);
+    display.objectives.shown = 0;
+    const keys: FrameKeys = .{ .display = &display, .player = &mission.player, .devices = &devices, .slot = mission.slot(player), .view = .cockpit, .game_ticks = 0, .multiplayer = false, .all = mission.objects };
+    // With no primary target, nothing changes.
+    primaryTarget(keys);
+    try std.testing.expectEqual(null, ai.playerControlEntry(mission.objects).?.target.slot());
+    // With one, it becomes the player's target, and the objectives open on the current one.
+    mission.player.primary_target = .{ .index = target };
+    primaryTarget(keys);
+    try std.testing.expectEqual(target, ai.playerControlEntry(mission.objects).?.target.slot());
+    try std.testing.expectEqual(2, display.objectives.shown);
+    try std.testing.expect(display.windows.status.get(.objectives).phase != .shut);
 }
 
 test frameKeys {

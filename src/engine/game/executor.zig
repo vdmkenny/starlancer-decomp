@@ -10,6 +10,8 @@ const dte = @import("../../formats/dte.zig");
 const engine = @import("../../engine.zig");
 const Code = engine.Code;
 const vm = @import("../vm.zig");
+const input = @import("../input.zig");
+const ai = @import("ai.zig");
 const aigeneric = @import("aigeneric.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
@@ -69,6 +71,22 @@ const implementations = table: {
         .{ "SetTriggerState", vm.triggers.setTriggerState },
         .{ "SetAnyTriggerState", vm.triggers.setAnyTriggerState },
         .{ "WhenPlayerLastJumped", whenPlayerLastJumped },
+        .{ "DestroyFlightGroup", destroyFlightGroup },
+        .{ "ClearAI", clearAI },
+        .{ "StartShipAnimation", startShipAnimation },
+        .{ "StartShipAnimationReverse", startShipAnimationReverse },
+        .{ "DisableObject", disableObject },
+        .{ "SetPlayerTarget", setPlayerTarget },
+        .{ "SetTargetable", setTargetable },
+        .{ "SetActionCentre", setActionCentre },
+        .{ "DisableGuns", disableGuns },
+        .{ "SetEscortPoint", setEscortPoint },
+        .{ "SetPrimaryTarget", setPrimaryTarget },
+        .{ "SnapToPoint", snapToPoint },
+        .{ "IsShipThisPlayer", isShipThisPlayer },
+        .{ "SetFlybackMarker", setFlybackMarker },
+        .{ "ResetFlybackMarker", resetFlybackMarker },
+        .{ "MatchSpeed", matchSpeed },
     }) |pair| table[commandIndex(pair[0])] = pair[1];
     break :table table;
 };
@@ -509,6 +527,290 @@ fn whenPlayerLastJumped(call: Call) u32 {
     return @max(@as(u32, @intCast(ago)), 1);
 }
 
+/// The slot of the object that stands for the ship at `place` (`ship_index`, `ship_object`), where
+/// it is one of the objects: the game takes any place for a ship's.
+fn shipSlot(machine: *const vm.Machine, all: *const create.Objects, place: u32) ?u16 {
+    const ship = machine.shipIndex(place) orelse return null;
+    return if (ship < all.slots.len) ship else null;
+}
+
+/// `cmd_DestroyFlightGroup` (`0x00457FD0`, command `0x04`): each ship of the flight group the
+/// argument names leaves the mission at once, a stand-in in its place (`create.retire`).
+///
+/// Not ported: the atmosphere of a planet among them let go of (`0x00545868`), as the planets'
+/// atmospheres are not ported ([#233](https://github.com/vdmkenny/openreliant/issues/233)).
+fn destroyFlightGroup(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const group = machine.flightGroupIndex(call.args[0]) orelse return 1;
+    const groups = machine.mission.flightGroups() catch return 1;
+    if (group >= groups.len) return 1;
+    const all = game.world.objects;
+    for (machine.mission.groupShips(groups[group])) |ship| {
+        if (ship < all.slots.len) create.retire(game, ship);
+    }
+    return 1;
+}
+
+/// `cmd_ClearAI` (`0x004588C0`, command `0x0C`): each ship the argument names drops its orders
+/// (`clearAIShip`).
+fn clearAI(call: Call) u32 {
+    vm.Machine.forEachShip(call, clearAIShip);
+    return 1;
+}
+
+/// `cmd_ClearAI_ship` (`0x004588E0`): a ship past the players' slots drops every order, where its
+/// current one gives way (`aigeneric.clear`).
+fn clearAIShip(call: Call, ship: u16) void {
+    const game = call.machine.game.?;
+    if (ship < game.world.objects.players) return;
+    aigeneric.clear(game, ship) catch |err| log.warn("mission ship {d} keeps its orders: {s}", .{ ship, @errorName(err) });
+}
+
+/// How fast `StartShipAnimation` plays its track, a step, forwards and backwards (`0x0045874B`).
+const animation_speed: f32 = 4;
+
+/// `cmd_StartShipAnimation` (`0x00458720`, command `0x11`): each part of the ship the first
+/// argument names plays its track the second names, from the start, in the track's own mode, at
+/// `animation_speed` (`objects.Model.playNamed`).
+fn startShipAnimation(call: Call) u32 {
+    playShipAnimation(call, false);
+    return 1;
+}
+
+/// `cmd_StartShipAnimationReverse` (`0x004587D0`, command `0x3D`): the same backwards, each part's
+/// track from where it stands.
+fn startShipAnimationReverse(call: Call) u32 {
+    playShipAnimation(call, true);
+    return 1;
+}
+
+fn playShipAnimation(call: Call, backwards: bool) void {
+    const machine = call.machine;
+    const game = machine.game orelse return;
+    const all = game.world.objects;
+    const ship = shipSlot(machine, all, call.args[0]) orelse return;
+    const model = if (all.slots[ship].model) |*live| live else return;
+    const name = machine.text(call.args[1]) catch return;
+    for (model.parts, 0..) |*part, index| {
+        const time: f32 = if (backwards) part.animation.time else 0;
+        model.playNamed(index, name, time, null, if (backwards) -animation_speed else animation_speed);
+    }
+}
+
+/// `cmd_DisableObject` (`0x004583C0`, command `0x1C`): each ship the first argument names is
+/// disabled, or enabled again (`disableObjectShip`).
+fn disableObject(call: Call) u32 {
+    vm.Machine.forEachShip(call, disableObjectShip);
+    return 1;
+}
+
+/// `cmd_DisableObject_ship` (`0x004583E0`): where the first argument names one of the ship's
+/// components (`push_component`), the component's assembly shows its damaged model while the second
+/// argument is set, and its own again while it is not; otherwise the ship is disabled, which leaves
+/// it out of the mission's work (`GameObject.Flags.disabled`), or enabled again.
+fn disableObjectShip(call: Call, ship: u16) void {
+    const machine = call.machine;
+    const slot = &machine.game.?.world.objects.slots[ship];
+    const disabled = call.args[0] != 0;
+    const component = machine.argumentComponent(call.thread, 0) orelse {
+        slot.object.flags.disabled = disabled;
+        return;
+    };
+    const part = slot.component(component) orelse return;
+    const model = if (slot.model) |*live| live.holding(part) orelse return else return;
+    var each = model.assembly(part.link_id);
+    while (each.next()) |at| {
+        const piece = &model.parts[at];
+        piece.hidden = if (piece.flags.damaged) !disabled else disabled;
+    }
+}
+
+/// `cmd_SetPlayerTarget` (`0x00458C80`, command `0x21`): where the first argument names the
+/// player's ship, the ship the second names, or its component (`push_component`), becomes the
+/// player's target, where it can be aimed at (`ai.targetValid`): the player's Player Control order
+/// is aimed at it, the display follows (`hud.State.targetChanged`), and the player stops matching
+/// speeds (`input.Player.matching_speed`).
+///
+/// Not ported: a ship past the players' slots aimed through its Multiplayer Control order, which
+/// no ship has outside a multiplayer game ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
+fn setPlayerTarget(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const world = game.world;
+    const all = world.objects;
+    if (shipSlot(machine, all, call.args[0]) != all.player) return 1;
+    const component: i16 = if (machine.argumentComponent(call.thread, 1)) |part| part else aigeneric.Target.whole;
+    const aimed: aigeneric.Target = .{ .kind = .ship, .index = targetIndex(machine.shipIndex(call.args[1])), .component = component };
+    if (!ai.targetValid(all, aimed, .{})) return 1;
+    const entry = ai.playerControlEntry(all) orelse return 1;
+    entry.target.index = aimed.index;
+    entry.target.component = aimed.component;
+    if (world.display) |display| display.targetChanged(all, false);
+    world.player.matching_speed = false;
+    return 1;
+}
+
+/// `cmd_SetTargetable` (`0x00458D50`, command `0x22`): each ship the first argument names can be
+/// targeted, or not (`setTargetableShip`).
+fn setTargetable(call: Call) u32 {
+    vm.Machine.forEachShip(call, setTargetableShip);
+    return 1;
+}
+
+/// `cmd_SetTargetable_ship` (`0x00458D70`): where the first argument names one of the ship's
+/// components (`push_component`), the component can be picked as a subtarget, or not
+/// (`objects.Model.Part.targetable`); otherwise the ship can be targeted, where its type allows, or
+/// not (`ai.setTargetable`).
+fn setTargetableShip(call: Call, ship: u16) void {
+    const machine = call.machine;
+    const slot = &machine.game.?.world.objects.slots[ship];
+    const targetable = call.args[0] != 0;
+    const component = machine.argumentComponent(call.thread, 0) orelse return ai.setTargetable(&slot.object, slot.combat, targetable);
+    if (slot.component(component)) |part| part.targetable = targetable;
+}
+
+/// `cmd_SetActionCentre` (`0x00458E60`, command `0x25`): the sphere the fighters keep to
+/// (`aigeneric.ActionSphere`) centres on the object the first argument names, its radius the
+/// second, or the default one for none.
+///
+/// **Fix:** where the first argument names no object, the game centres the sphere on the slot
+/// before the objects; OpenReliant keeps its centre.
+fn setActionCentre(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const all = game.world.objects;
+    const sphere = &all.action_sphere;
+    if (shipSlot(machine, all, call.args[0])) |centre| sphere.centre = centre;
+    const radius: f32 = @floatFromInt(call.args[1]);
+    sphere.radius = if (radius == 0) aigeneric.ActionSphere.default.radius else radius;
+    return 1;
+}
+
+/// `cmd_DisableGuns` (`0x00459200`, command `0x2F`): each ship the first argument names fires no
+/// guns, or fires them again (`disableGunsShip`).
+fn disableGuns(call: Call) u32 {
+    vm.Machine.forEachShip(call, disableGunsShip);
+    return 1;
+}
+
+/// `cmd_DisableGuns_ship` (`0x00459220`): the ship's guns are disabled while the command's second
+/// argument is set, and enabled again while it is not (`GameObject.Flags.guns_disabled`), which
+/// rests its turrets too.
+fn disableGunsShip(call: Call, ship: u16) void {
+    call.machine.game.?.world.objects.slots[ship].object.flags.guns_disabled = call.args[0] != 0;
+}
+
+/// `cmd_SetEscortPoint` (`0x004592F0`, command `0x31`): each ship the first argument names takes
+/// the object the second names as its escort point (`setEscortPointShip`).
+fn setEscortPoint(call: Call) u32 {
+    vm.Machine.forEachShip(call, setEscortPointShip);
+    return 1;
+}
+
+/// `cmd_SetEscortPoint_ship` (`0x00459310`): the ship's escort point becomes the object the
+/// command's second argument names, or none (`GameObject.escort_point`).
+fn setEscortPointShip(call: Call, ship: u16) void {
+    const machine = call.machine;
+    const all = machine.game.?.world.objects;
+    all.slots[ship].object.escort_point = .from(shipSlot(machine, all, call.args[0]));
+}
+
+/// `cmd_SetPrimaryTarget` (`0x00459550`, command `0x39`): the ship the argument names, or its
+/// component (`push_component`), becomes the mission's primary target, which PRIMARY TARGET makes
+/// the player's (`input.Player.primary_target`); none where it names no object.
+fn setPrimaryTarget(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const all = game.world.objects;
+    const index = shipSlot(machine, all, call.args[0]) orelse {
+        game.world.player.primary_target = null;
+        return 1;
+    };
+    game.world.player.primary_target = .{ .index = index, .component = machine.argumentComponent(call.thread, 0) };
+    return 1;
+}
+
+/// `cmd_SnapToPoint` (`0x004596A0`, command `0x3E`): the ship the first argument names, unless it
+/// is exploding, ejected or out of a multiplayer game (`GameObject.Flags._unknown_28`), is put where
+/// the object the second names will stand next, turned as it will be, and stopped (`ai.stop`).
+///
+/// Not ported: in a multiplayer game, the move told to the other players
+/// ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
+fn snapToPoint(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const all = game.world.objects;
+    const ship = shipSlot(machine, all, call.args[0]) orelse return 1;
+    const slot = &all.slots[ship];
+    const flags = slot.object.flags;
+    if (flags.exploding or flags.ejected or flags._unknown_28) return 1;
+    const point = shipSlot(machine, all, call.args[1]) orelse return 1;
+    const to = all.slots[point].object.root;
+    objects.setPosition(&slot.object, &slot.drawn, gameobj.vector(to.next_position));
+    objects.setOrientation(&slot.object, &slot.drawn, to.next_orientation);
+    ai.stop(&slot.object);
+    return 1;
+}
+
+/// What `IsShipThisPlayer` answers: 1 for yes, which the scripts test for, and 2 for no; a command's
+/// result of 0 would suspend its thread.
+const answer_yes: u32 = 1;
+const answer_no: u32 = 2;
+
+/// `cmd_IsShipThisPlayer` (`0x004598F0`, command `0x45`): whether the argument names the player's
+/// ship.
+fn isShipThisPlayer(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return answer_no;
+    return if (machine.shipIndex(call.args[0]) == game.world.objects.player) answer_yes else answer_no;
+}
+
+/// `cmd_SetFlybackMarker` (`0x00459910`, command `0x46`): the flyback markers start afresh with
+/// each ship the first argument names (`setFlybackMarkerShip`).
+fn setFlybackMarker(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    game.world.player.flyback = .{};
+    vm.Machine.forEachShip(call, setFlybackMarkerShip);
+    return 1;
+}
+
+/// `cmd_SetFlybackMarker_ship` (`0x00459960`): the ship, unless it is a stand-in, is marked, the
+/// command's second argument its reach (`input.Flyback.mark`).
+fn setFlybackMarkerShip(call: Call, ship: u16) void {
+    const game = call.machine.game.?;
+    if (game.world.objects.slots[ship].object.type == .stand_in) return;
+    game.world.player.flyback.mark(ship, @floatFromInt(call.args[0]));
+}
+
+/// `cmd_ResetFlybackMarker` (`0x004599E0`, command `0x47`): the flyback markers are dropped, and the
+/// player's ship points to no nav point.
+fn resetFlybackMarker(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const all = game.world.objects;
+    game.world.player.flyback = .{};
+    all.slots[all.player].object.nav_point = .none;
+    return 1;
+}
+
+/// `cmd_MatchSpeed` (`0x00459A90`, command `0x4A`): where the first argument names the player's
+/// ship, the player matches the target's speed from now on, where the second is set, having
+/// matched it at once where it already did (`input.matchTargetSpeed`), or stops matching it.
+fn matchSpeed(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const world = game.world;
+    const all = world.objects;
+    if (machine.shipIndex(call.args[0]) != all.player) return 1;
+    if (call.args[1] != 0) {
+        input.matchTargetSpeed(world.player, all, world.view);
+        world.player.matching_speed = true;
+    } else {
+        world.player.matching_speed = false;
+    }
+    return 1;
+}
+
 /// A command's implementation. `args` points at its first argument on the stack. The result is
 /// stored in `Thread.result`, and a zero result also ends the handler loop.
 pub const Command = Code("uint __fastcall (byte **ip, uint *args)");
@@ -787,6 +1089,159 @@ test "the commands that set ships, the radio, the display and the space" {
     try std.testing.expectEqual(6, environment.requested);
     // Neither the sync nor the films hold the thread in a game of one player with no films.
     try std.testing.expect(fixture.machine.finished);
+}
+
+test "the commands mission 1 runs at the convoy" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    for ([_]u8{ 0, 1, 2, 3 }) |group| {
+        try routine.op(.push_flight_group, &.{group});
+        try routine.command("CreateFlightGroup");
+    }
+    // The second Sabre becomes the player's target and the primary one; the action centres on the
+    // first Sabre, 50000 across; the Sabres' guns are disabled.
+    try routine.op(.push_ship, &.{2});
+    try routine.op(.push_byte, &.{1});
+    try routine.command("SetTargetable");
+    try routine.op(.push_ship, &.{0});
+    try routine.op(.push_ship, &.{2});
+    try routine.command("SetPlayerTarget");
+    try routine.op(.push_ship, &.{2});
+    try routine.command("SetPrimaryTarget");
+    try routine.op(.push_ship, &.{1});
+    try routine.pushConstant(50000);
+    try routine.command("SetActionCentre");
+    try routine.op(.push_flight_group, &.{1});
+    try routine.op(.push_byte, &.{1});
+    try routine.command("DisableGuns");
+    // The player escorts the nav point, which also marks where to fly back to, 20000 about it; a
+    // Grendel is put on the nav point, and the other disabled.
+    try routine.op(.push_ship, &.{0});
+    try routine.op(.push_ship, &.{3});
+    try routine.command("SetEscortPoint");
+    try routine.op(.push_ship, &.{3});
+    try routine.pushConstant(20000);
+    try routine.command("SetFlybackMarker");
+    try routine.op(.push_ship, &.{4});
+    try routine.op(.push_ship, &.{3});
+    try routine.command("SnapToPoint");
+    try routine.op(.push_ship, &.{5});
+    try routine.op(.push_byte, &.{1});
+    try routine.command("DisableObject");
+    // Which of two ships is the player's.
+    for ([_]u8{ 0, 1 }, [_]u8{ 0, 2 }) |global, ship| {
+        try routine.op(.select_global, &.{global});
+        try routine.op(.push_ship, &.{ship});
+        try routine.command("IsShipThisPlayer");
+        try routine.op(.push_result, &.{});
+        try routine.op(.assign, &.{});
+    }
+    // The player matches its target's speed; the Sabres drop their orders.
+    try routine.op(.push_ship, &.{0});
+    try routine.op(.push_byte, &.{1});
+    try routine.command("MatchSpeed");
+    try routine.op(.push_flight_group, &.{1});
+    try routine.command("ClearAI");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    var marker = testShip(3, 2, nav_point_kind, dte.Ship.no_pilot);
+    marker.position = .{ 0, 0, 30000 };
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .globals = &.{ 0, 0 },
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, 1, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(2, 1, @intFromEnum(gameobj.Type.sabre), 42),
+            marker,
+            testShip(4, 3, @intFromEnum(gameobj.Type.grendel), 5),
+            testShip(5, 3, @intFromEnum(gameobj.Type.grendel), 5),
+        },
+        .flight_groups = &.{ testGroup(6, 0), testGroup(7, dte.FlightGroup.no_wing), testGroup(8, dte.FlightGroup.no_wing), testGroup(9, dte.FlightGroup.no_wing) },
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    world.tables.combat[@intFromEnum(gameobj.Type.sabre)].targeting.targetable = true;
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    fixture.machine.game = game;
+    try fixture.machine.start();
+
+    const all = world.objects;
+    try std.testing.expectEqual(2, ai.playerControlEntry(all).?.target.slot());
+    try std.testing.expectEqual(2, world.player.primary_target.?.index);
+    try std.testing.expectEqual(null, world.player.primary_target.?.component);
+    try std.testing.expectEqual(1, all.action_sphere.centre);
+    try std.testing.expectEqual(50000, all.action_sphere.radius);
+    try std.testing.expect(all.slots[1].object.flags.guns_disabled and all.slots[2].object.flags.guns_disabled);
+    try std.testing.expect(!all.slots[0].object.flags.guns_disabled);
+    try std.testing.expectEqual(gameobj.Slot.of(3), all.slots[0].object.escort_point);
+    try std.testing.expectEqual(1, world.player.flyback.count);
+    try std.testing.expectEqual(3, world.player.flyback.markers[0].slot);
+    try std.testing.expectEqual(20000, world.player.flyback.markers[0].reach);
+    try std.testing.expectEqual(30000, all.slots[4].object.root.position.z);
+    try std.testing.expect(all.slots[5].object.flags.disabled);
+    try std.testing.expectEqual(answer_yes, fixture.global(0));
+    try std.testing.expectEqual(answer_no, fixture.global(1));
+    try std.testing.expect(world.player.matching_speed);
+    try std.testing.expectEqual(0, all.slots[1].object.order_count);
+    // The player's ship, 30000 from the nav point, points back to it.
+    input.nextNavPoint(game.world);
+    try std.testing.expectEqual(gameobj.Slot.of(3), all.slots[0].object.nav_point);
+}
+
+test "the flyback markers and the Grendels go, and the action sphere takes its default" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    for ([_]u8{ 0, 1 }) |group| {
+        try routine.op(.push_flight_group, &.{group});
+        try routine.command("CreateFlightGroup");
+    }
+    try routine.op(.push_ship, &.{1});
+    try routine.pushConstant(0);
+    try routine.command("SetActionCentre");
+    try routine.command("ResetFlybackMarker");
+    try routine.op(.push_flight_group, &.{1});
+    try routine.command("DestroyFlightGroup");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, 1, @intFromEnum(gameobj.Type.grendel), 5),
+            testShip(2, 1, @intFromEnum(gameobj.Type.grendel), 5),
+        },
+        .flight_groups = &.{ testGroup(3, 0), testGroup(4, dte.FlightGroup.no_wing) },
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    fixture.machine.game = game;
+    world.player.flyback.mark(0, 10);
+    world.objects.action_sphere.radius = 5;
+    try fixture.machine.start();
+
+    const all = world.objects;
+    try std.testing.expectEqual(aigeneric.ActionSphere.default.radius, all.action_sphere.radius);
+    try std.testing.expectEqual(0, world.player.flyback.count);
+    try std.testing.expectEqual(.none, all.slots[0].object.nav_point);
+    for ([_]u16{ 1, 2 }) |ship| try std.testing.expectEqual(.stand_in, all.slots[ship].object.type);
 }
 
 test shipType {

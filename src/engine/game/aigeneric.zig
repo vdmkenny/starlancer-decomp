@@ -196,9 +196,8 @@ pub const ActionSphere = struct {
     centre: u16,
     radius: f32,
 
-    /// Where the AI's setup (`0x0040C9B0`) puts it, around the first slot, and where
-    /// `SetActionCentre` puts it back when given no radius. Missions move it
-    /// ([#36](https://github.com/vdmkenny/openreliant/issues/36)).
+    /// Where the AI's setup (`0x0040C9B0`) puts it, around the first slot; `SetActionCentre` moves
+    /// it, and gives it this radius when given none.
     pub const default: ActionSphere = .{ .centre = 0, .radius = 220000 };
 };
 

@@ -738,7 +738,7 @@ pub fn createObject(all: *Objects, tables: *Stats, types: Types, wanted: ?u16, a
     object.created = true;
     object.last_attacker = .none;
     object.nav_point = .none;
-    object._unknown_724 = -1;
+    object.escort_point = .none;
     object.fought_by = 0;
     object.motion = .null;
     object.side = .neutral;

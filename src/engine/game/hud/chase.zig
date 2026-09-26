@@ -1,12 +1,9 @@
 //! The chase view's objects in the scene, which `hud_init` (`0x00483150`) builds: a sight of two
 //! squares ahead of the player's ship (`chase_sight_near`, `chase_sight_far`), which `camera_chase`
-//! places; blind fire's mark where the guns aim (`chase_blind_mark`); and a pointer to the target
-//! where it stands out of sight (`chase_target_pointer`), which `hud_target` turns.
-//! `hud_missile_lock` (`0x00491520`) picks their textures and adds them to the overlay, in the view
-//! ahead from the chase mode.
-//!
-//! Not ported: the pointer to the next nav point (`chase_nav_pointer`, `0x005667AC`), which needs
-//! the nav points ([#36](https://github.com/vdmkenny/openreliant/issues/36)).
+//! places; blind fire's mark where the guns aim (`chase_blind_mark`); a pointer to the target where
+//! it stands out of sight (`chase_target_pointer`), and one to the player's nav point
+//! (`chase_nav_pointer`, `0x005667AC`), which `hud_target` turns. `hud_missile_lock` (`0x00491520`)
+//! picks their textures and adds them to the overlay, in the view ahead from the chase mode.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -20,8 +17,8 @@ const srtexture = @import("../../surrender/surrenderlib/srtexture.zig");
 const matmanager = @import("../matmanager.zig");
 const xtrabits = @import("../xtrabits.zig");
 
-/// How far across the sight's squares and blind fire's mark are, and the pointer, which stands
-/// `pointer_drop` below its middle (`0x004DC5A8`).
+/// How far across the sight's squares and blind fire's mark are, and the pointers, whose squares
+/// stand `pointer_drop` above the point they turn about (`0x004DC5A8`).
 const sight_size: f32 = 600;
 const pointer_size: f32 = 200;
 const pointer_drop: f32 = 400;
@@ -42,13 +39,20 @@ pub const Pointer = struct {
     hostile: bool,
 
     /// The pointer for a target the way `way` from the ship, across and down in its frame
-    /// (`hud.pointerDirection`): turned so that it points that way, the way's angle from straight
-    /// up, going round to the right, and half a turn more.
-    ///
-    /// **Improvement:** the game takes the angle from `sr_atan`'s table, a quadrant at a time; the
-    /// port computes it.
+    /// (`hud.pointerDirection`), turned so that it points that way (`rollToward`).
     pub fn toward(way: [2]f32, hostile: bool) Pointer {
-        return .{ .roll = std.math.atan2(way[0], -way[1]) + std.math.pi, .hostile = hostile };
+        return .{ .roll = rollToward(way), .hostile = hostile };
+    }
+
+    /// The roll that turns a pointer the way `way`, as the pointers to the target and to the nav
+    /// point are turned alike: the way's angle from straight up, going round to the right.
+    /// `hud_target` works the angle out from the way `hud_pointer_direction` gives, the way turned
+    /// half round, and turns it half a turn more, which comes to the same.
+    ///
+    /// **Improvement:** the game takes the angle from `sr_atan`'s table, a quadrant at a time;
+    /// OpenReliant computes it.
+    pub fn rollToward(way: [2]f32) f32 {
+        return std.math.atan2(way[0], -way[1]);
     }
 };
 
@@ -59,6 +63,7 @@ const images = struct {
     const sight_bright = "chasetarget2";
     const hostile_pointer = "chasepointat2";
     const other_pointer = "chasepointat3";
+    const nav_pointer = "chasepointat";
 };
 
 /// One of the objects: a mesh of its own, as `mesh_build_square` (`0x0044F000`) makes one, and its
@@ -71,9 +76,9 @@ const Square = struct {
 
     const corners = 4;
 
-    /// The mesh `size` across, standing `drop` below its middle, facing along Z as two triangles
-    /// over the whole of `image`, added to what is drawn and coloured by `own` colours, or at full
-    /// strength without them.
+    /// The mesh `size` across, standing `drop` above the point it turns about, facing along Z as
+    /// two triangles over the whole of `image`, added to what is drawn and coloured by `own`
+    /// colours, or at full strength without them.
     fn init(square: *Square, gpa: Allocator, size: f32, drop: f32, image: *srtexture.Image, own: ?[4]f32) Allocator.Error!void {
         var mesh: srapiext.Mesh = try .create(gpa, .{ .polygons = 2, .vertices = corners, .indices = 6 });
         errdefer mesh.deinit(gpa);
@@ -116,13 +121,15 @@ pub const Chase = struct {
     far: Square,
     mark: Square,
     pointer: Square,
+    nav_pointer: Square,
     sight: *srtexture.Image,
     sight_bright: *srtexture.Image,
     hostile_pointer: *srtexture.Image,
     other_pointer: *srtexture.Image,
+    nav_image: *srtexture.Image,
 
     /// `hud_init`'s objects for the chase view: the sight's near square at full strength, its far
-    /// one half grey, blind fire's mark white, and the pointer.
+    /// one half grey, blind fire's mark white, and the two pointers.
     pub fn create(gpa: Allocator, textures: *srtexture.Table) (Allocator.Error || matmanager.Error)!*Chase {
         const chase = try gpa.create(Chase);
         errdefer gpa.destroy(chase);
@@ -130,6 +137,7 @@ pub const Chase = struct {
         chase.sight_bright = try matmanager.textureRequire(textures, images.sight_bright);
         chase.hostile_pointer = try matmanager.textureRequire(textures, images.hostile_pointer);
         chase.other_pointer = try matmanager.textureRequire(textures, images.other_pointer);
+        chase.nav_image = try matmanager.textureRequire(textures, images.nav_pointer);
         try chase.near.init(gpa, sight_size, 0, chase.sight, null);
         errdefer chase.near.mesh.deinit(gpa);
         try chase.far.init(gpa, sight_size, 0, chase.sight, half_grey);
@@ -137,11 +145,13 @@ pub const Chase = struct {
         try chase.mark.init(gpa, sight_size, 0, chase.sight, white);
         errdefer chase.mark.mesh.deinit(gpa);
         try chase.pointer.init(gpa, pointer_size, pointer_drop, chase.hostile_pointer, null);
+        errdefer chase.pointer.mesh.deinit(gpa);
+        try chase.nav_pointer.init(gpa, pointer_size, pointer_drop, chase.nav_image, null);
         return chase;
     }
 
     pub fn destroy(chase: *Chase, gpa: Allocator) void {
-        for ([_]*Square{ &chase.near, &chase.far, &chase.mark, &chase.pointer }) |square| square.mesh.deinit(gpa);
+        for ([_]*Square{ &chase.near, &chase.far, &chase.mark, &chase.pointer, &chase.nav_pointer }) |square| square.mesh.deinit(gpa);
         gpa.destroy(chase);
     }
 
@@ -149,9 +159,10 @@ pub const Chase = struct {
     /// placing of the sight, for the player's ship at `ship`: the sight's squares `near_reach` and
     /// `far_reach` ahead, turned as the ship is, bright while a target stands under the reticle
     /// (`bright`) unless blind fire aims; while blind fire aims at `aim`, its mark `near_reach` that
-    /// way, bright where a target stands under the reticle; and the pointer `near_reach` ahead,
-    /// where `hud_target` has turned it this frame.
-    pub fn draw(chase: *Chase, gpa: Allocator, scene: *srcore.Scene, ship: math.Place, bright: bool, aim: ?Vector, pointer: ?Pointer) Allocator.Error!void {
+    /// way, bright where a target stands under the reticle; and the pointers `near_reach` ahead,
+    /// where `hud_target` has turned them this frame: the nav point's rolled by `nav_roll`, where
+    /// the target's stands.
+    pub fn draw(chase: *Chase, gpa: Allocator, scene: *srcore.Scene, ship: math.Place, bright: bool, aim: ?Vector, pointer: ?Pointer, nav_roll: ?f32) Allocator.Error!void {
         const ahead = math.forward(ship.orientation);
         const sight_image = if (bright and aim == null) chase.sight_bright else chase.sight;
         try chase.near.add(gpa, scene, ship.position, ahead, near_reach, ship.orientation, sight_image);
@@ -160,18 +171,24 @@ pub const Chase = struct {
             const mark_image = if (bright) chase.sight_bright else chase.sight;
             try chase.mark.add(gpa, scene, ship.position, math.normalize(point - ship.position), near_reach, ship.orientation, mark_image);
         }
-        const shown = pointer orelse return;
-        const turn = math.product(ship.orientation, math.fromAngles(0, 0, shown.roll));
-        try chase.pointer.add(gpa, scene, ship.position, ahead, near_reach, turn, if (shown.hostile) chase.hostile_pointer else chase.other_pointer);
+        if (pointer) |shown| {
+            const turn = math.product(ship.orientation, math.fromAngles(0, 0, shown.roll));
+            try chase.pointer.add(gpa, scene, ship.position, ahead, near_reach, turn, if (shown.hostile) chase.hostile_pointer else chase.other_pointer);
+        }
+        const roll = nav_roll orelse return;
+        const turn = math.product(ship.orientation, math.fromAngles(0, 0, roll));
+        try chase.nav_pointer.add(gpa, scene, ship.position, ahead, near_reach, turn, chase.nav_image);
     }
 };
 
 test "the pointer points the way to the target" {
-    // Straight up the view the pointer, which hangs below its middle, is turned half round.
-    try std.testing.expectApproxEqAbs(std.math.pi, Pointer.toward(.{ 0, -1 }, true).roll, 1e-6);
-    // To the right a quarter more, and down a whole turn.
-    try std.testing.expectApproxEqAbs(1.5 * std.math.pi, Pointer.toward(.{ 1, 0 }, true).roll, 1e-6);
-    try std.testing.expectApproxEqAbs(2 * std.math.pi, Pointer.toward(.{ 0, 1 }, false).roll, 1e-6);
+    // Straight up the view the pointer, whose square stands above the point it turns about, is
+    // not turned; to the right it turns a quarter round, down half round, and to the left a
+    // quarter round back.
+    try std.testing.expectApproxEqAbs(0, Pointer.toward(.{ 0, -1 }, true).roll, 1e-6);
+    try std.testing.expectApproxEqAbs(0.5 * std.math.pi, Pointer.toward(.{ 1, 0 }, true).roll, 1e-6);
+    try std.testing.expectApproxEqAbs(std.math.pi, Pointer.toward(.{ 0, 1 }, false).roll, 1e-6);
+    try std.testing.expectApproxEqAbs(-0.5 * std.math.pi, Pointer.rollToward(.{ -1, 0 }), 1e-6);
 }
 
 test Square {
@@ -180,7 +197,7 @@ test Square {
     var square: Square = undefined;
     try square.init(gpa, pointer_size, pointer_drop, &image, half_grey);
     defer square.mesh.deinit(gpa);
-    // The pointer's square hangs below its middle, and colours itself half grey.
+    // The pointer's square stands above the point it turns about, and colours itself half grey.
     try std.testing.expectEqual(@as(Vector, .{ -100, -500, 0 }), square.mesh.positions[0]);
     try std.testing.expectEqual(@as(Vector, .{ 100, -300, 0 }), square.mesh.positions[2]);
     try std.testing.expect(square.object.flags.baked_object);

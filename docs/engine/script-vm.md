@@ -155,6 +155,20 @@ Some of the commands mission 1 runs:
 | `SetObjective` (`0x43`) | Sets the state of one of the mission's objectives ([Display](hud.md#the-objectives)) |
 | `SetShipAvoidance` (`0x49`) | Each ship the first argument names, unless a stand-in, keeps clear of others no more while the second is set (`no_avoidance`, [Orders](orders.md#avoidance)) |
 | `MultiplayerScriptSync` (`0x56`) | In a multiplayer game, holds the players' scripts in step; in a game of one, runs on |
+| `DestroyFlightGroup` (`0x04`) | Each ship of the flight group leaves the mission at once, a stand-in in its place (`object_retire`), a planet's atmosphere let go of with it |
+| `ClearAI` (`0x0C`) | Each ship the argument names, past the players' slots, drops its orders, where its current one gives way (`orders_clear`, [Orders](orders.md)) |
+| `StartShipAnimation` (`0x11`), `StartShipAnimationReverse` (`0x3D`) | Each part of the ship the first argument names plays its track the second names, in the track's own mode, at 4 a step from its start, or at -4 from where it stands (`node_play_named`) |
+| `DisableObject` (`0x1C`) | Each ship the first argument names is disabled while the second is set, which leaves it out of the mission's work, or enabled again; for the component `push_component` named, its assembly shows its damaged model instead, or its own again |
+| `SetPlayerTarget` (`0x21`) | Where the first argument names the player's ship, the ship the second names, or its component, becomes the player's target, where the player can aim at it; the display follows, and MATCH SPEED stops ([Display](hud.md#the-target)) |
+| `SetTargetable` (`0x22`) | Each ship the first argument names can be targeted, where its type allows, or not; for the component `push_component` named, whether it can be picked as a subtarget |
+| `SetActionCentre` (`0x25`) | The action sphere ([Maneuvers](maneuvers.md)) centres on the object the first argument names, its radius the second, or 220000 for none |
+| `DisableGuns` (`0x2F`) | Each ship the first argument names fires no guns while the second is set, its turrets resting too |
+| `SetEscortPoint` (`0x31`) | Each ship the first argument names takes the object the second names as its escort point (`+0x724`), whose marker the display shows for the player's ship (`escort_marker_frame`, `0x00468D00`) |
+| `SetPrimaryTarget` (`0x39`) | The ship the argument names, or its component, becomes the mission's primary target, which PRIMARY TARGET makes the player's ([Display](hud.md#picking-a-target)) |
+| `SnapToPoint` (`0x3E`) | The ship the first argument names, unless it is exploding, ejected or out of a multiplayer game, is put where the object the second names will stand next, turned as it will be, and stopped |
+| `IsShipThisPlayer` (`0x45`) | 1 where the argument names the player's ship, 2 otherwise |
+| `SetFlybackMarker` (`0x46`), `ResetFlybackMarker` (`0x47`) | Set the flyback markers afresh on each ship the first argument names, the second their reach, or drop them ([Display](hud.md#the-flyback-markers)) |
+| `MatchSpeed` (`0x4A`) | Where the first argument names the player's ship, MATCH SPEED turns on, matching at once where it already was, while the second is set, and off otherwise |
 
 ## The clock and timers
 
@@ -356,11 +370,14 @@ the commands that act on the game: `CreateFlightGroup` ([Missions](missions.md#t
 `WaitForJumpOrLaunch` ([Launches](launch.md#how-a-launch-is-given)), `SetInvulnerability`,
 `SetShipAvoidance`, the radio's `DisableTaunts` and `DisableGenericComms`, `PlayMusic`, the
 display's `OpenInstrument`, `CloseInstrument` and `SetObjective`, the space's
-`SetEnvironmentFXNebula` and `UpdateEnvironmentFXState`, `WaitForMovie`, `MultiplayerScriptSync` and
-`WhenPlayerLastJumped`. They act on it through the world the mission's start and its frame give
-the machine, which the game reaches through its globals. A command not ported
-yet does nothing and gives 1, which lets the thread run on, and is logged the first time it runs
-([#36](https://github.com/vdmkenny/openreliant/issues/36),
+`SetEnvironmentFXNebula` and `UpdateEnvironmentFXState`, `WaitForMovie`, `MultiplayerScriptSync`,
+`WhenPlayerLastJumped`, and those of the ships and the player's targets: `DestroyFlightGroup`,
+`ClearAI`, `StartShipAnimation`, `StartShipAnimationReverse`, `DisableObject`, `SetPlayerTarget`,
+`SetTargetable`, `SetActionCentre`, `DisableGuns`, `SetEscortPoint`, `SetPrimaryTarget`,
+`SnapToPoint`, `IsShipThisPlayer`, `SetFlybackMarker`, `ResetFlybackMarker` and `MatchSpeed`. They
+act on it through the world the mission's start and its frame give the machine, which the game
+reaches through its globals. A command not ported yet does nothing and gives 1, which lets the
+thread run on, and is logged the first time it runs ([#36](https://github.com/vdmkenny/openreliant/issues/36),
 [#281](https://github.com/vdmkenny/openreliant/issues/281)).
 
 [`vm/triggers.zig`](../../src/engine/vm/triggers.zig) matches the events to the triggers, raises

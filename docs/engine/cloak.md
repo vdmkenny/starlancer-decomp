@@ -136,7 +136,9 @@ A ship flying the Fight order cloaks as its maneuver asks (`fight_update_cloak`,
 maneuver's `Cloak` command asks for the cloak 500 ticks on ([Maneuvers](maneuvers.md)), and a new
 maneuver asks for none until it does. Each update after calling for help, a ship whose model can
 cloak cloaks once that tick has come, and uncloaks while none is asked for. The mission's
-`Cloak_ship` command (`cmd_Cloak_ship`, `0x00459F60`) cloaks or uncloaks a ship too.
+`Cloak_ship` command (`cmd_Cloak_ship`, `0x00459F60`) cloaks or uncloaks a ship too, and so does
+the Toggle Cloak order, the other way from how it stands (`order_toggle_cloak`, `0x0040B640`,
+[Orders](orders.md)).
 
 ## In OpenReliant
 

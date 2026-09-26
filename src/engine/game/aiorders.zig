@@ -1,5 +1,6 @@
-//! The orders a ship flies by: Mill, Do Nothing, Escort, Fly, Run Away, Find New Target, Slow
-//! Rotate, the Random Spins, Match Speed and Disrupted; and the two that launch a missile. [`aigeneric.zig`](aigeneric.zig) runs them, [`ai.zig`](ai.zig) steers for them, and
+//! The orders a ship flies by: Mill, Do Nothing, Escort, Fly, Run Away, Find New Target, Object
+//! Attach, Toggle Cloak, Slow Rotate, the Random Spins, Match Speed and Disrupted; and the two that
+//! launch a missile. [`aigeneric.zig`](aigeneric.zig) runs them, [`ai.zig`](ai.zig) steers for them, and
 //! `docs/engine/orders.md` describes what each does.
 //!
 //! **Unknown:** its source file. The code lies after `aifight.cpp`'s and before `aifuncs.cpp`'s,
@@ -16,6 +17,7 @@ const Vector = math.Vector;
 const ai = @import("ai.zig");
 const aigeneric = @import("aigeneric.zig");
 const Context = aigeneric.Context;
+const cloak = @import("cloak.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const Order = @import("ai/orders.zig").Order;
@@ -412,6 +414,59 @@ fn weighTarget(ctx: Context, index: u16, target: aigeneric.Target) void {
         state.mill_weight = crowd;
         state.mill_component = target.component;
     }
+}
+
+// --- Object Attach and Toggle Cloak ---------------------------------------------------------
+
+/// What Object Attach keeps in `order_state`: where the ship stands in its target's frame.
+pub const AttachState = extern struct {
+    offset: shp.Vec3,
+    _unknown_0c: [0x90 - 0x0C]u8,
+
+    comptime {
+        assert(@sizeOf(AttachState) == 0x90);
+    }
+};
+
+/// `order_object_attach_init` (`0x0040B4A0`): the init of Object Attach (13). The ship keeps where
+/// it will stand next in the frame its target will stand in next.
+pub fn attachInit(ctx: Context, index: u16) void {
+    const all = ctx.world.objects;
+    const slot = &all.slots[index];
+    const target = slot.orders[0].target.slotIn(all) orelse return;
+    const to = all.slots[target].object.root;
+    const offset = math.transformTransposed(to.next_orientation, slot.object.nextPosition() - gameobj.vector(to.next_position));
+    slot.state.attach.offset = gameobj.vec3(offset);
+}
+
+/// `order_object_attach` (`0x0040B4F0`): the update of Object Attach (13). The ship rides its
+/// target: it is put where its offset stands in the target's next frame, turned as the target will
+/// be, and takes the target's turn, velocity, speed and rates of turn, which move it on with the
+/// target until the next update.
+pub fn attach(ctx: Context, index: u16) void {
+    const all = ctx.world.objects;
+    const slot = &all.slots[index];
+    const target = slot.orders[0].target.slotIn(all) orelse return;
+    const other = &all.slots[target].object;
+    const to = other.root;
+    const at = math.transform(to.next_orientation, gameobj.vector(slot.state.attach.offset)) + gameobj.vector(to.next_position);
+    objects.setPosition(&slot.object, &slot.drawn, at);
+    objects.setOrientation(&slot.object, &slot.drawn, to.next_orientation);
+    const object = &slot.object;
+    object.rotation = other.rotation;
+    object.velocity = other.velocity;
+    object.speed = other.speed;
+    object.pitch_rate = other.pitch_rate;
+    object.yaw_rate = other.yaw_rate;
+    object.roll_rate = other.roll_rate;
+}
+
+/// `order_toggle_cloak` (`0x0040B640`): Toggle Cloak (16), which runs once. The ship cloaks where it
+/// is not cloaked, and uncloaks where it is (`cloak.set`): where its model can cloak, with the ships
+/// launching from it.
+pub fn toggleCloak(ctx: Context, index: u16) void {
+    const object = &ctx.world.objects.slots[index].object;
+    cloak.set(ctx.world, index, !object.flags.cloaked);
 }
 
 /// `order_slow_rotate` (`0x0040B660`): the update of Slow Rotate (18), which turns the ship on the
@@ -928,4 +983,44 @@ test "Mill circles its target for a while" {
     mission.clock.frame_start = mill_ticks + 1;
     aigeneric.objectOrders(ctx, ship);
     try std.testing.expectEqual(0, mission.slot(ship).object.order_count);
+}
+
+test "Object Attach rides its target, where it stood in the target's frame" {
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(std.testing.allocator);
+    defer mission.deinit();
+    const ctx = mission.orders();
+    const pod = try mission.addOther(.{ 100, 0, 1000 });
+    const ship = try mission.add(.predator, .{ 0, 0, 1000 });
+    const carrier = mission.slot(ship);
+    const quarter = math.rotation(.y, std.math.pi / 2.0);
+    objects.setOrientation(&carrier.object, &carrier.drawn, quarter);
+    _ = try aigeneric.pushShip(ctx, pod, .object_attach, ship, aigeneric.Target.whole);
+    aigeneric.objectOrders(ctx, pod);
+    const offset = math.transformTransposed(quarter, .{ 100, 0, 0 });
+    // Where it stood, turned as the ship is.
+    try std.testing.expectEqual(Vector{ 100, 0, 1000 }, mission.slot(pod).drawn.position);
+    try std.testing.expectEqual(quarter, mission.slot(pod).drawn.orientation);
+    // The ship moves on and turns back: the pod keeps its place in the ship's frame, and moves
+    // with it.
+    carrier.object.root.next_position = .{ .x = 0, .y = 0, .z = 5000 };
+    carrier.object.root.next_orientation = math.identity;
+    carrier.object.velocity = .{ .x = 0, .y = 0, .z = 50 };
+    carrier.object.speed = 50;
+    aigeneric.objectOrders(ctx, pod);
+    const at = mission.slot(pod).drawn.position;
+    const expected = offset + Vector{ 0, 0, 5000 };
+    inline for (0..3) |axis| try std.testing.expectApproxEqAbs(expected[axis], at[axis], 1e-3);
+    try std.testing.expectEqual(50, mission.slot(pod).object.velocity.z);
+    try std.testing.expectEqual(50, mission.slot(pod).object.speed);
+}
+
+test toggleCloak {
+    const gpa = std.testing.allocator;
+    var stage: cloak.testing.Cloaked = undefined;
+    try stage.init(gpa);
+    defer stage.deinit(gpa);
+    // A ship that can cloak, uncloaked, cloaks.
+    toggleCloak(stage.mission.orders(), stage.index);
+    try std.testing.expect(stage.slot().object.flags.cloaked);
 }

@@ -160,6 +160,9 @@ pub const State = extern union {
     bytes: [0x90]u8,
     fight: aifight.FightState,
     fly: aiorders.FlyState,
+    mill: aiorders.MillState,
+    escort: aiorders.EscortState,
+    find_target: aiorders.FindTargetState,
     explode: aiexplode.State,
     eject_player: aieject.PlayerState,
     eject: aieject.State,
@@ -469,6 +472,8 @@ pub fn flyBackwards(ctx: Context, index: u16) void {
 fn runInit(ctx: Context, index: u16, info: orders.Info) void {
     switch (info.order) {
         .fly => aiorders.flyInit(ctx, index),
+        .mill => aiorders.millInit(ctx, index),
+        .escort => aiorders.escortInit(ctx, index),
         .random_spin_slow => aiorders.randomSpinInit(ctx, index, .slow),
         .random_spin_medium => aiorders.randomSpinInit(ctx, index, .medium),
         .random_spin_fast => aiorders.randomSpinInit(ctx, index, .fast),
@@ -492,6 +497,9 @@ fn runUpdate(ctx: Context, index: u16, info: orders.Info) void {
     switch (info.order) {
         .do_nothing => aiorders.doNothing(ctx, index),
         .fly => aiorders.fly(ctx, index),
+        .mill => aiorders.mill(ctx, index),
+        .escort => aiorders.escort(ctx, index),
+        .find_new_target => aiorders.findNewTarget(ctx, index),
         .run_away => aiorders.runAway(ctx, index),
         .slow_rotate => aiorders.slowRotate(ctx, index),
         .match_speed => aiorders.matchSpeed(ctx, index),

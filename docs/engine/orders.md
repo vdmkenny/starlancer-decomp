@@ -4,7 +4,7 @@ What each object is doing: flying in formation, escorting, docking, exploding, o
 
 [`aigeneric.zig`](../../src/engine/game/aigeneric.zig) holds the stack and runs the orders, [`ai.zig`](../../src/engine/game/ai.zig) the steering they turn by, [`aiorders.zig`](../../src/engine/game/aiorders.zig) the orders that fly a ship, [`aieject.zig`](../../src/engine/game/aieject.zig) and [`tractor.zig`](../../src/engine/game/tractor.zig) those of the [ejection](ejection.md), [`launch.zig`](../../src/engine/game/launch.zig) the [launches](launch.md) and [`jump.zig`](../../src/engine/game/jump.zig) the [jumps](jump.md), and [`ai/orders.zig`](../../src/engine/game/ai/orders.zig) lists every order with its flags, priorities and routines; `make order-tables` transcribes that table from the executable. The names below are those `make ghidra-annotate` gives the Ghidra project, which names each order's routines `order_` and the order's name, with `_init` and `_exit` for those two.
 
-Ported so far: the stack (`order_push`, `order_pop`, `orders_clear`, `orders_pop_all`), what runs it (`object_orders`, `orders_update`, `order_retaliate`), the steering (`ai_steer`, `ai_roll_upright`) with its avoidance, and the orders Do Nothing, Fly, Run Away, Slow Rotate, the Random Spins, Match Speed, 44 and 45, Explode, the ejection's (Eject, 106, Scoop Up, Eject Spin, Eject Fighter Attack and Eject Player), Launch, the jumps (Jump In and Jump Out, each under both its numbers) and Fight with its [combat maneuvers](maneuvers.md), with Player Control being the player's [controls](controls.md). An order OpenReliant does not run yet still holds its place on the stack, and pushing it still pops and starts what it should ([#30](https://github.com/vdmkenny/openreliant/issues/30)). Not ported: the orders other players' machines queue ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
+Ported so far: the stack (`order_push`, `order_pop`, `orders_clear`, `orders_pop_all`), what runs it (`object_orders`, `orders_update`, `order_retaliate`), the steering (`ai_steer`, `ai_roll_upright`) with its avoidance, and the orders Do Nothing, Fly, Run Away, Slow Rotate, the Random Spins, Match Speed, 44 and 45, Explode, the ejection's (Eject, 106, Scoop Up, Eject Spin, Eject Fighter Attack and Eject Player), Launch, the jumps (Jump In and Jump Out, each under both its numbers), Escort, Find New Target, Mill and Fight with its [combat maneuvers](maneuvers.md), with Player Control being the player's [controls](controls.md). An order OpenReliant does not run yet still holds its place on the stack, and pushing it still pops and starts what it should ([#30](https://github.com/vdmkenny/openreliant/issues/30)). Not ported: the orders other players' machines queue ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
 
 OpenReliant keeps each object's stack and order state in its slot rather than allocating them with its first order, and hands a fatal "Cannot set ai" back to its caller as an error.
 
@@ -216,6 +216,8 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | 3, nameless | One-shot: as Launch Missile, from the first rack of Jack Hammers. |
 | Fly (6) | Flies at the speed in its data, or at full throttle for zero. With a target it flies to it and pops within 2000 units; otherwise it keeps the heading it had when it started, steering at a point 20000 units along it. It steers with flags `0x7` and halves the throttle while avoiding. An object without flight stats is moved along that heading instead. |
 | Run Away (7) | Flies away from the target at half throttle, steering with flags `0x3`. Pops when the target's slot holds a stand-in. |
+| Escort (9) | On starting, takes the ship its target names, or the ship at the order's number among a flight group's or a squad's ships, counting round them again past the last (the walk's visitor at `0x0040AA50`); OpenReliant takes none where the group has no ships, which the game walks for ever (**Fix**). Each update, it pops once that ship's slot holds a stand-in; otherwise it steers for a point 10000 ahead of the ship: within 5000 of it with half its turn and flags `0x4`, and farther off with its full turn and flags `0x3`. Its throttle is the escorted ship's speed over its own cruise speed, and 0.0001 more for each unit the escorted ship lies ahead along its own heading. |
+| Find New Target (10) | Walks the ships its target names, weighing each it can aim at, cloaked or not, by the square of its node's distance from where the ship will be next ([Picking a fight](#picking-a-fight)). It fights the lightest to fight, pushing Fight, or Torpedo (103) for a ship of the torpedo class; with none, it mills round the lightest to mill round, pushing Mill (120); with neither it pops. |
 | Toggle Cloak (16) | One-shot: cloaks or uncloaks the ship if its model's header allows a cloak, and the ships being launched from it do the same. |
 | Slow Rotate (18) | Zero throttle, yaw input 0.1. |
 | Random Spin Slow, Medium, Fast (22 to 24) | On starting, zero throttle and each turning input 0.1 plus a random number times 0.3, 0.5 or 0.9. Its update does nothing. |
@@ -230,6 +232,7 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | Jump In (19, 40) | The ship arrives beside its target, flying in from far behind it; 40 first holds its place in the formation a while ([Jumps](jump.md#jump-in)). |
 | Jump Out (20, 41) | The ship turns to where it goes, charges and jumps: to its target, where Jump In of the matching number brings it in, or out of the mission where it names none; a ship jumping with the player's goes in formation behind it ([Jumps](jump.md#jump-out)). |
 | Launch (104) | The ship leaves its carrier, in the style the carrier's type picks ([Launches](launch.md)). |
+| Mill (120) | On starting, where it can aim at its target, cloaked or not, keeps the tick and a circle facing from the target's node to where the ship will be next. Each update it pops once it can aim at the target no more or 500 ticks have passed; otherwise it flies at full throttle, steering with flags `0x3` for a point on the circle 50000 from the node, which comes round from the ship's side by 0.000005 of its cruise speed a tick. |
 | Disrupted (114) | A Havoc's shockwave gives it ([Effects](effects.md#shockwaves)). On starting, sets object flag `0x8` (unpowered), keeps the tick to end at, the duration in its data (a word) after `frame_start`, takes the push in its data after that (three floats) as a knock in the ship's own frame, though the shockwave gives it in the world's, and knocks each turn rate by up to 0.05 either way at random, which the ship tumbles by. It also plays fifteen [electric rays](effects.md#electric-rays) over the ship, each from its centre out to its radius in a random direction, 90 either way, with a jitter of 0.6, flickering, dimming as they go dark, and lasting as long as the order, white (0.8, 0.8, 1) and blue (0.3, 0.5, 1) in turn. It pops past that tick, and its `exit` clears the flag. |
 | Eject (30) | The pilot leaves the ship in its cockpit, which becomes the pod, and the rest of the ship a new object; the pod clears the ship, and the player's waits to be picked up ([Ejection](ejection.md#the-pod)). |
 | Eject (106) | The ship a pilot has left: destroyed 200 ticks on. |
@@ -239,3 +242,20 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | Eject Player (118) | The player's ship drifts, unpowered, for 400 to 599 ticks, then explodes, unless the pilot ejects first ([Destruction](objects.md#destruction), [Ejection](ejection.md#ejecting)). |
 
 **Unknown:** what the other orders do.
+
+### Picking a fight
+
+Find New Target's walk visits each ship with `0x0040AE90`, which passes over one the ship cannot aim
+at, cloaked or not. It counts the objects with stats whose current order is aimed at that ship and
+component: Fight, and Mill. The ship then weighs as one to fight the square of the distance times
+one more than the ships that fight it, and as one to mill round, times one more than those and one
+more than those that mill round it. The lightest of each is kept, but to fight only a ship that is
+not cloaked, not the target set aside for the searcher (`+0x6AC`, which the radio's menu sets to the
+player's target for 3000 ticks, `0x0045517F`), and for a fighter one that fewer than two others
+fight. A set-aside target whose time is up (`+0x6B0` before `game_ticks`) is set aside no more, but
+is passed over as one to fight this walk still.
+
+**Quirk:** the game weighs the one to fight by 0.7 more (`0x004DC484`) where the count of objects it
+has just walked through equals the player's slot, which never happens; it looks meant to favour the
+player's ship ([#314](https://github.com/vdmkenny/openreliant/issues/314)). OpenReliant weighs as
+the game does.

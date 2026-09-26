@@ -727,8 +727,8 @@ pub fn createObject(all: *Objects, tables: *Stats, types: Types, wanted: ?u16, a
     object.invulnerable = .none;
     object.visibility = 1;
     object.engines = 0;
-    object._unknown_6ac = -1;
-    object._unknown_6b0 = 0;
+    object.set_aside = .none;
+    object.set_aside_until = 0;
     object.eject_roll = xtrabits.objectRandom15(object) % 100;
     objects.setPosition(object, &slot.drawn, at);
     objects.setOrientation(object, &slot.drawn, math.identity);

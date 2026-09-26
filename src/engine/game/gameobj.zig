@@ -790,9 +790,11 @@ pub const GameObject = extern struct {
     countermeasure_at: i32,
     /// How many Fight orders have taken it as their target.
     fought_by: u32,
-    /// **Unknown.** -1 when created.
-    _unknown_6ac: i32,
-    _unknown_6b0: u32,
+    /// A target Find New Target does not pick to fight until `game_ticks` pass `set_aside_until`,
+    /// which the radio's menu sets to the player's target for 3000 ticks (`0x0045517F`); none when
+    /// created.
+    set_aside: Slot,
+    set_aside_until: u32,
     /// What `avoidance_scan` finds the ship could hit, for the avoidance code: the objects that
     /// list components (`ai.avoidNear`), and the rest (`ai.avoidAhead`).
     avoid_near: Avoided,
@@ -1091,7 +1093,7 @@ pub const GameObject = extern struct {
         assert(@offsetOf(GameObject, "smoke_level") == 0x660);
         assert(@offsetOf(GameObject, "gun_condition") == 0x66C);
         assert(@offsetOf(GameObject, "_unknown_678") == 0x678);
-        assert(@offsetOf(GameObject, "_unknown_6ac") == 0x6AC);
+        assert(@offsetOf(GameObject, "set_aside") == 0x6AC);
         assert(@offsetOf(GameObject, "avoid_near") == 0x6B4);
         assert(@offsetOf(GameObject, "avoid_ahead") == 0x6E0);
         assert(@offsetOf(GameObject, "eject_roll") == 0x70C);

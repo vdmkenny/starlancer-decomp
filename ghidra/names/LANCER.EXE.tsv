@@ -1609,3 +1609,6 @@ address	kind	name	type	comment
 0054d100	data	escort_marker_clock	int	The ticks the escort point's marker pulses by, 0 to 299
 0054d104	data	escort_marker_mesh	void *	The escort point's marker's mesh
 0054d108	data	escort_marker	void *	The escort point's marker's scene object
+0040aa50	function	escort_count_place	bool __fastcall (int slot, OrderTarget *target)	Escort's walk: counts the ship off the place still to go (OrderState +0x00), and once it goes below nothing takes the ship as the one to escort (+0x04)
+0040ae90	function	find_target_weigh	bool __fastcall (int slot, OrderTarget *target)	Find New Target's walk: weighs a ship the searcher can aim at by the square of its distance, times the ships whose current order fights it, and mills round it, keeping the lightest to fight (+0x04) and to mill round (+0x10); never ends the walk
+00401810	function	object_has_stats	bool __fastcall (int slot)	Whether the object in the slot is of a type with stats: below 0x100

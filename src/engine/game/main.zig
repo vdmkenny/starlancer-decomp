@@ -36,6 +36,7 @@ const particles = @import("particles.zig");
 const shield = @import("shield.zig");
 const erayfx = @import("erayfx.zig");
 const tractor = @import("tractor.zig");
+const airipper = @import("airipper.zig");
 pub const flash = @import("main/flash.zig");
 pub const cockpit = @import("main/cockpit.zig");
 const shockwave = @import("shockwave.zig");
@@ -300,6 +301,8 @@ pub const Frame = struct {
     rays: ?*erayfx.Rays = null,
     /// The tractors, which go into the world's layer after the objects.
     tractors: ?*tractor.Tractors = null,
+    /// The Rippers' beams, which go into the world's layer after the objects.
+    rippers: ?*airipper.Rippers = null,
     /// The screen's flash, which goes into the overlay's layer, and the ticks the frame spans
     /// (`frame_duration`), which it counts down.
     flash: ?*flash.Flash = null,
@@ -689,6 +692,7 @@ pub fn drawFrame(gpa: Allocator, arena: Allocator, scene: *srcore.Scene, context
     attachments.paused = frame.paused;
     try drawObjects(gpa, scene, frame.objects, attachments, frame.seat, if (frame.explosions) |explosions| &explosions.splits else null, frame.shown);
     if (frame.tractors) |tractors| try tractors.draw(gpa, scene, frame.objects);
+    if (frame.rippers) |rippers| try rippers.draw(gpa, scene, frame.objects);
     try missiles.draw(frame.objects, gpa, scene, attachments);
     if (frame.trails) |trails| try trails.draw(gpa, scene);
     if (frame.countermeasures) |dropped| try dropped.draw(gpa, scene, attachments);
@@ -1429,6 +1433,7 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     if (world.trails) |trails| trails.reset();
     if (world.rays) |rays| rays.reset();
     if (world.tractors) |tractors| tractors.reset();
+    if (world.rippers) |rippers| rippers.reset();
     if (world.flash) |lit| lit.* = .{};
     start.display.interference = .{};
     start.display.caption = .{};

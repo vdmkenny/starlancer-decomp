@@ -292,7 +292,11 @@ pub const Type = enum(u32) {
     limpet_car = 0x1D,
     /// The Prowler (`us_prowler.shp`).
     prowler = 0x1E,
+    /// The Ripper (`ripper_2.shp`), which carries cargo pods in its beams
+    /// ([`airipper.zig`](airipper.zig)).
     ripper = 0x1F,
+    /// The Mammoth (`a_mammoth.shp`), a freighter the Ripper loads with cargo pods.
+    mammoth = 0x21,
     /// The Stork (`stork.shp`).
     stork = 0x25,
     sabre = 0x2B,
@@ -306,6 +310,8 @@ pub const Type = enum(u32) {
     pukov = 0x38,
     /// The Kurgan (`rus_kurgan.shp`).
     kurgan = 0x3C,
+    /// The Sharov (`sharov.shp`).
+    sharov = 0x3D,
     /// The Gurevich (`rmc_gurevich.shp`).
     gurevich = 0x3E,
     /// Capital ships (`saladin.shp`, `stalag.shp`, `antanov.shp`, `kronstadt.shp`, `boridin.shp`).
@@ -367,6 +373,8 @@ pub const Type = enum(u32) {
     boridin_breakaway = 0xA8,
     /// Another escape pod (`ber_escape.shp`).
     other_escape_pod = 0x90,
+    /// A cargo pod (`us_cargo.shp`), which the Ripper carries.
+    cargo_pod = 0x91,
     /// The Zakov (`zakov.shp`).
     zakov = 0xB0,
     /// The Turret Flak's shell (`shell.shp`).
@@ -432,6 +440,9 @@ pub const Type = enum(u32) {
             .{ .antanov, "antanov.shp" },
             .{ .limpet_car, "limpet_t_car.shp" },
             .{ .ripper, "ripper_2.shp" },
+            .{ .mammoth, "a_mammoth.shp" },
+            .{ .sharov, "sharov.shp" },
+            .{ .cargo_pod, "us_cargo.shp" },
             .{ .sabre, "rus_sabre.shp" },
             .{ .kamov, "rus_kamov.shp" },
             .{ .scimitar, "scimitar.shp" },
@@ -1448,6 +1459,8 @@ pub const World = struct {
     rays: ?*@import("erayfx.zig").Rays = null,
     /// The tractors (`tractor.cpp`); null where no ship takes another aboard.
     tractors: ?*@import("tractor.zig").Tractors = null,
+    /// What the Rippers carry, and their beams (`airipper.cpp`); null where no Ripper carries.
+    rippers: ?*@import("airipper.zig").Rippers = null,
     /// The screen's flash (`main.cpp`); null where nothing flashes.
     flash: ?*@import("main/flash.zig").Flash = null,
     /// The force feedback the player's controller plays; null where it plays none.

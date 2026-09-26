@@ -377,6 +377,88 @@ ends, where the game stops.
 Not ported: the Nanny's, the limpet car's and the limpet pod's styles
 ([#320](https://github.com/vdmkenny/openreliant/issues/320)).
 
+### The Ripper
+
+The Ripper (type `0x1F`) carries cargo pods in the tractor beams of its four back pincers
+(`airipper.cpp`). Mission 1 has one lift sixteen pods onto a Mammoth at Fort Sherman: its script
+orders the first grab, and two triggers that resume where they stopped (`InterruptTriggerCode`)
+answer each RipperGrabbedObject with the next drop and each RipperDroppedObject with the next grab.
+
+Two tables of 150 entries serve every Ripper, set up as a mission loads (`0x0040FC90`) and let go as
+it ends (`0x0040FCF0`). `rippercargo` (`0x00518648`) pairs a Ripper with what it carries, filled in
+turn from `next_rippercargo` (`0x00518AFC`); what a Ripper carries is the first entry naming it
+(`0x00412340`). A set of beams (`0x74` bytes each at `0x00518B00`, the next at `0x00518640`) is
+four tractor beams (`tractor_beam_mesh`, over `laser2`), one from the first point of each pincer's
+first point list, the first two reaching for the middle of the pod's first pair of points and the
+last two for that of its second ([SHP](../formats/shp.md)). An order shows them as it runs
+(`0x00412200`), aimed and faded as a tractor's beams are.
+
+The Ripper's tracks play on every part of it that has them (`0x0049A400`): `ready to grab`, its
+forearms reaching out; `grab pod`, its pincers closing; and `cabin turn`. A step that waits for a
+track played backwards waits for the root's first child's track to be back at its start. Each
+wait for the other players between the steps (`0x00401000`) passes at once in a single-player
+game. A Ripper comes to rest where its turning inputs and its throttle are within 0.025, and its
+rates of turn within 0.02.
+
+Ripper grabs target object (12) lifts its target aboard. Its init (`0x0040FD10`) makes the target
+invulnerable, takes the beams, flies the Ripper by `motion_plain`, held (`attached`), and has the two
+pass through each other. The Ripper stops 2500 above the target's component, in its frame, where the
+target names one; in mission 26, 1000 below the target, which it lifts from below; else at the
+target. Its steps (`0x0040FF80`), each timed from its start:
+
+| Step | What happens |
+|---|---|
+| 1 | The Ripper steers at the point (limit 0.3): at full throttle while more than 2000 beyond where it stops, at 0.2 nearer, and not at all within 2000 of the point, or 100 lifting from below; near it and not facing it within 0.7, it holds still. At rest, it plays `ready to grab` at 15 |
+| 2 | From below, it turns to face the target until at rest |
+| 3 | 150 ticks: the beams come on, as the square of the time; then the target is heard (sound `0x3D`) and no longer frozen |
+| 4 | 300 ticks: the target is drawn halfway to 300 from the Ripper, toward it |
+| 5 | 500 ticks: the target turns to match the Ripper, easing (`cosine_ease`) |
+| 6 | 300 ticks: it is drawn the rest of the way; then heard (sound `0x3C`), and the Ripper plays `grab pod` at 10 |
+| 7 | 150 ticks; then the Ripper plays `cabin turn` at 4.5 |
+| 8 | 500 ticks |
+| 9 | The target's part `Cargo pod` hides and the Ripper's shows; the target is disabled and as invulnerable as before; the Ripper carries it and flies astern (`motion_backward`); the order ends, with the Ripper's RipperGrabbedObject |
+
+Should the target go first, the Ripper takes back its motion and the order ends. Its exit
+(`0x00410B50`) lets the Ripper go and frees the beams.
+
+Make ripper drop what it's carrying (39) (`0x00410B90`, `0x00410C00`) stops the Ripper, flies it by
+`motion_plain`, held. Where the order names a ship, the Ripper fits what it carries to it instead
+(order 112). Else, at rest (its speed and rates below 0.05, by their signs), it plays `grab pod` from
+350 at -10, is heard (sound `0x3C`), and lets go: what it carries stands where its own `Cargo pod`
+is, and shows in its place; the order ends, and Ripper end drop object (111) takes over. What it
+drops stays disabled.
+
+Ripper end drop object (111) (`0x00410E60`, `0x00410E90`) lets the Ripper go; it plays `ready to
+grab` from 350 at -6, then backs away astern at 0.2 for 50 ticks, and plays `cabin turn` from 400 at
+-4.5. Once its cabin is round, it turns, still flying astern, to put its tail to a point 10000 ahead
+of it (limit 2), and flies on (`motion_forward`): neither it nor what it dropped passes through the
+other any more, it carries nothing, and it has its RipperDroppedObject.
+
+Ripper attach cargo pod to Mammoth (112) (`0x00411200`, `0x00411420`) fits what the Ripper carries
+to the component its target names. The Ripper flies astern to 2500 above the component, in its
+frame, or below it on a Sharov or a Boridin: at full throttle beyond 2000, then by `motion_plain` at
+0.2 until within 300. At rest, it faces the component (limit 2) and plays `grab pod` from 350 at
+-10. Then the ship is no longer frozen, and the pod stands where the Ripper's own was; over 150
+ticks the beams come on, and it is heard (sound `0x3D`), shown in place of the Ripper's and
+enabled. Over 1000 ticks it eases onto the component, keeping its turn for the first 0.15 of the
+time, then turning, easing, until half of it, to the component's orientation turned a quarter back
+about its X on a Mammoth, a Sharov or a Boridin and about its Z on another. Heard as it arrives
+(sound `0x3C`), the Ripper plays `ready to grab` from 350 at -6, then
+`cabin turn` from 400 at -4.5, and turns to put its tail to a point 10000 behind it. Then the pod
+is gone into the ship: disabled, no longer targetable and hidden, and the component shows; the
+Ripper flies on (`motion_forward`) and has its RipperDroppedObject. It still carries the pod: only
+Ripper end drop object ends that.
+
+**Unknown:** what keeps a Mammoth's cargo slots hidden until the Ripper fills them; OpenReliant
+shows them from the start ([#324](https://github.com/vdmkenny/openreliant/issues/324)).
+
+**Fix:** where the next `rippercargo` entry is still taken, the game stops with "Ripper Grab AI
+error: Too many rippers doing their stuff at once."; where a Ripper carries nothing, it stops with
+"Can't find the object the ripper grabbed!"; and for a component of a type its table of the Mammoth
+and the Stalag lacks, it reads the grab point's height past the table's end. OpenReliant logs the
+first and takes the entry, ends the order for the second, and stands 2500 above the component for
+the third.
+
 ### Picking a fight
 
 Find New Target's walk visits each ship with `0x0040AE90`, which passes over one the ship cannot aim

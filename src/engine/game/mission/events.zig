@@ -405,6 +405,26 @@ pub fn scooped(world: gameobj.World, index: u16, object: u16) void {
     events.postGroup(ship, .{ .condition = .object_scooped, .values = &values });
 }
 
+/// `event_ripper_grabbed` (`0x0045AB10`): the Ripper in slot `index` has the object in slot
+/// `object` aboard (`airipper.grab`). Its ship's RipperGrabbedObject, with the ship of what it took,
+/// goes on to its groups.
+pub fn ripperGrabbed(world: gameobj.World, index: u16, object: u16) void {
+    const events = world.events orelse return;
+    const ship = events.shipOf(index) orelse return;
+    var values = [_]u32{events.value(object)};
+    events.postGroup(ship, .{ .condition = .ripper_grabbed_object, .values = &values });
+}
+
+/// `event_ripper_dropped` (`0x0045AB90`): the Ripper in slot `index` has let go of the object in
+/// slot `object`, or fitted it to a ship (`airipper.endDrop`, `airipper.attach`). Its ship's
+/// RipperDroppedObject, with the ship of what it let go, goes on to its groups.
+pub fn ripperDropped(world: gameobj.World, index: u16, object: u16) void {
+    const events = world.events orelse return;
+    const ship = events.shipOf(index) orelse return;
+    var values = [_]u32{events.value(object)};
+    events.postGroup(ship, .{ .condition = .ripper_dropped_object, .values = &values });
+}
+
 /// `event_post_explosion` (`0x0045AB50`): the explosion that the object in slot `index` set off is
 /// over. Its ship's ExplosionShip, with the ship, goes on to its groups.
 pub fn exploded(world: gameobj.World, index: u16) void {

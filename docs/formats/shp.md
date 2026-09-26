@@ -207,6 +207,11 @@ The kinds the game reads:
 | 5 | `split_update` (`0x00470030`) | Where fireballs go off as a split ship's halves part |
 | 6 | `order_scoop_up` | Where a ship's two tractor beams come from: the first two points |
 
+The Ripper's orders take a part's first list, whatever its kind, which in the shipped models is
+kind 6: on each of the Ripper's back pincers, one point, where its beam comes from; and on a cargo
+pod's part `Cargo pod`, four, the middles of whose two pairs its beams reach for
+([The Ripper](../engine/orders.md#the-ripper)).
+
 `shp.PointList` holds a list, and `sltool shp info` counts each part's lists.
 
 ### Firing arc (tag `0x10`)

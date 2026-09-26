@@ -2039,6 +2039,15 @@ pub const Model = struct {
         return if (model.countParts(&count)) count.found else null;
     }
 
+    /// Where `part`, one of this model's parts or of a model it carries however deep, stands in
+    /// the world at `step`, with this model's root at `root` (`partAt`); null for a part of
+    /// neither.
+    pub fn placeOf(model: *Model, root: math.Place, part: *const Part, step: Step) ?math.Place {
+        const held = model.holding(part) orelse return null;
+        const index = (@intFromPtr(part) - @intFromPtr(held.parts.ptr)) / @sizeOf(Part);
+        return model.partAt(root, held, index, step);
+    }
+
     /// The model holding `part`, the model itself or one it carries however deep (`node_holder`,
     /// for the root it hangs from); null for a part of neither.
     pub fn holding(model: *Model, part: *const Part) ?*Model {

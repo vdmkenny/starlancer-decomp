@@ -686,6 +686,8 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     defer rays.deinit();
     var tractors: game.tractor.Tractors = try .init(gpa, &textures);
     defer tractors.deinit();
+    var rippers: game.airipper.Rippers = try .init(gpa, &textures);
+    defer rippers.deinit();
     var flash: game.main.flash.Flash = .{};
     // The countermeasures' model, read once for the whole run, as `decoys_init` reads it.
     var effects_models: game.create.library.MountCache = .{ .gpa = arena, .resources = &resources, .textures = &textures };
@@ -705,7 +707,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     while (lacking.next()) |effect| std.log.warn("forces\\{s} is missing or isn't an effect file: it plays nothing", .{effect.fileName()});
     var force_feedback: engine.input.force.Forces = .{ .library = &found_forces.library, .settings = options.forces };
     // What the objects run in, the camera's view brought up to date each frame.
-    var world: game.gameobj.World = .{ .forces = &force_feedback, .objects = objects, .player = &player, .clock = &clock, .view = view.view, .shake = &view.hit_shake, .random = &rand, .difficulty = options.difficulty, .hearing = hearing, .camera = &view, .explosions = &explosions, .particles = &particles, .smoke = &smoke, .gun_particles = &gun_particles, .shockwaves = &shockwaves, .trails = &trails, .countermeasures = &countermeasures, .sparks = &sparks, .shields = &shields, .rays = &rays, .tractors = &tractors, .flash = &flash, .spawn = .{ .tables = tables, .types = types.types() }, .environment = &environment };
+    var world: game.gameobj.World = .{ .forces = &force_feedback, .objects = objects, .player = &player, .clock = &clock, .view = view.view, .shake = &view.hit_shake, .random = &rand, .difficulty = options.difficulty, .hearing = hearing, .camera = &view, .explosions = &explosions, .particles = &particles, .smoke = &smoke, .gun_particles = &gun_particles, .shockwaves = &shockwaves, .trails = &trails, .countermeasures = &countermeasures, .sparks = &sparks, .shields = &shields, .rays = &rays, .tractors = &tractors, .rippers = &rippers, .flash = &flash, .spawn = .{ .tables = tables, .types = types.types() }, .environment = &environment };
 
     // The pause menu, which stands in the display's place while the game is paused.
     var pause_menu: game.hudoptions.PauseMenu = .{};
@@ -924,6 +926,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
             .shields = &shields,
             .rays = &rays,
             .tractors = &tractors,
+            .rippers = &rippers,
             .flash = &flash,
             .interference = &display.state.interference,
             .ticks = @intCast(clock.frameTicks()),

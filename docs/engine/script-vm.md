@@ -230,6 +230,8 @@ event that a trigger's thread posts as it runs at once waits its turn in the sam
 | Launched | `event_launched` (`0x0045A9B0`), with the groups, as each launch style ends ([Launches](launch.md)) | The ship |
 | JumpedIn | `event_jumped_in` (`0x0045B300`), with the groups, as Jump In ends ([Jumps](jump.md#jump-in)) | The ship |
 | ObjectScooped | `0x0045AAD0`, with the groups, as Scoop Up has the pod aboard ([Ejection](ejection.md)) | The pod's ship |
+| RipperGrabbedObject | `event_ripper_grabbed` (`0x0045AB10`), with the groups, as a Ripper has what it grabbed aboard ([The Ripper](orders.md#the-ripper)) | What it grabbed's ship |
+| RipperDroppedObject | `event_ripper_dropped` (`0x0045AB90`), with the groups, as a Ripper leaves what it let go, or has fitted a pod to a ship ([The Ripper](orders.md#the-ripper)) | The pod's ship |
 | ExplosionShip | `event_post_explosion` (`0x0045AB50`), with the groups, as the Uber Explode ends ([Effects](effects.md)) | The ship |
 | Cloaked, Decloaked | `object_cloak`, `object_uncloak` ([Cloak](cloak.md)) | None |
 | PlayerReadyToJump, PlayerReadyToWarp | `player_jump` (`0x00412B20`), on the player's ship | None |

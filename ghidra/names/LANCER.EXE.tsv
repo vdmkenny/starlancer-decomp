@@ -1676,3 +1676,21 @@ address	kind	name	type	comment
 004070f0	function	dock_station	void __fastcall (int slot)	The update of Dock's station style: round to the port's line, latch on, slide in, then set in the berth and post Docked
 00407d10	function	dock_station_exit	void __fastcall (int slot)	The exit of Dock's station and Nanny styles: the first pass-through slot emptied
 004e1618	data	dock_styles	uint[30]	Dock's five styles: init, update, exit, 0, name and 0 each
+0040fc90	function	airipper_init	void __fastcall (void)	Sets the Rippers' tables up as a mission loads: every rippercargo entry empty, every set of beams free, and laser2 for their texture; a slip clears the first beam word of each set with a stride of 0x78
+0040fcf0	function	airipper_free	void __fastcall (void)	Frees every set of Ripper beams in use, as a mission ends
+00412140	function	airipper_fx_take	int __fastcall (void)	The next set of Ripper beams, freed first where in use: four tractor_beam_mesh beams; returns its index
+004121c0	function	airipper_fx_free	void __fastcall (void *fx)	Frees a set of Ripper beams in use: its four beams' scene objects
+00412200	function	airipper_fx_show	void __thiscall (int slot, float alpha)	Shows the set of beams of the Ripper's order: each from its pincer's point to the middle of its pair of the pod's points, the ribbons as long, faded to alpha by tractor_beam_fade, into the scene
+00412340	function	ripper_carried	int __fastcall (int slot)	What the Ripper in slot carries: the first rippercargo entry naming it; asserts where none does
+00412390	function	airipper_fx_pincers	void __fastcall (int slot, void *fx)	Notes where a set of beams comes from: the first point of the first point list of each of the Ripper's back pincers, and their frames
+00412480	function	ripper_grab_offset	void __fastcall (int *type, Vec3 *out)	How far above a component the Ripper grabs it, from ripper_grab_offsets by type; for a type the table lacks, it reads past its end
+0049a400	function	node_play_named_tree	void __fastcall (ModelNode *node, char *name, float time, int mode, float speed)	node_play_named on a node and every node under it
+00401000	function	ai_sequence_sync	bool __fastcall (int slot, int point)	A multiplayer game's wait for every player at a point of an order's sequence; true at once in a single-player game
+00518648	data	rippercargo	int[300]	Each Ripper's slot and what it carries, in pairs, -1 for none
+00518afc	data	next_rippercargo	int	The rippercargo entry the next grab fills
+00518b00	data	airipper_fx	byte[17400]	The Rippers' sets of beams, 150 of 0x74 bytes: in use, four beams, their pincer points and frames, the pod's two points and frames
+00518640	data	next_airipper_fx	int	The set of Ripper beams airipper_fx_take takes next
+00518af8	data	airipper_texture	void *	laser2, which the Ripper's beams are drawn over
+004e2060	data	ripper_grab_ticks	int[10]	How long each step of Ripper grabs target object lasts, -1 for a step that doesn't
+004e20ac	data	ripper_attach_ticks	int[6]	How long each step of Ripper attach cargo pod to Mammoth lasts, -1 for a step that doesn't
+004e20d8	data	ripper_grab_offsets	int[8]	The types whose components the Ripper grabs from above, and how far: the Mammoth and the Stalag, (0, 2500, 0) each

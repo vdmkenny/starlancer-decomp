@@ -164,7 +164,7 @@ pub const Beam = struct {
 
     /// The game draws the square in one group of polygons and the ribbons in another, of the same
     /// material; OpenReliant draws them in one.
-    fn create(gpa: Allocator, image: *srtexture.Image, ship: u16, part: usize, point: Vector) Allocator.Error!*Beam {
+    pub fn create(gpa: Allocator, image: *srtexture.Image, ship: u16, part: usize, point: Vector) Allocator.Error!*Beam {
         var corners: [beam_corners]Vector = undefined;
         corners[0..guns.blade_corners].* = .{
             .{ -beam_half, -beam_half, 0 }, .{ beam_half, -beam_half, 0 },
@@ -201,14 +201,14 @@ pub const Beam = struct {
         return beam;
     }
 
-    fn destroy(beam: *Beam, gpa: Allocator) void {
+    pub fn destroy(beam: *Beam, gpa: Allocator) void {
         beam.mesh.deinit(gpa);
         gpa.destroy(beam);
     }
 
     /// `tractor_beam_fade` (`0x0041CED0`): the beam as solid as `alpha`, from nothing to whole:
     /// each quad clear at its near corners and green, that solid, at its far ones.
-    fn fade(beam: *Beam, alpha: f32) void {
+    pub fn fade(beam: *Beam, alpha: f32) void {
         const solid = std.math.clamp(alpha, 0, 1);
         for (&beam.colours, 0..) |*colour, corner| switch (corner % guns.blade_corners) {
             1, 2 => colour.* = .{ 0, 1, 0, solid },
@@ -218,7 +218,7 @@ pub const Beam = struct {
 
     /// `tractor_beam_aim` (`0x0041CE00`): the beam from its point on a part standing at `part`,
     /// turned to `pod` and reaching it: the ribbons' far corners as far out as the pod is.
-    fn aim(beam: *Beam, part: math.Place, pod: Vector) void {
+    pub fn aim(beam: *Beam, part: math.Place, pod: Vector) void {
         const from = (math.Place{ .position = beam.point }).within(part).position;
         const orientation = math.lookAt(pod - from);
         beam.turn = math.product(math.transpose(part.orientation), orientation);

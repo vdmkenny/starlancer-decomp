@@ -209,13 +209,18 @@ pub fn listPlayerWing(all: *create.Objects, ships: []const u16) void {
 /// **Improvement:** the degrees are turned into radians exactly, where the game multiplies by a
 /// rounded pi/180 (`0x004DC71C`).
 pub fn recordOrientation(ship: dte.Ship) math.Matrix {
-    var turn = math.turned(math.identity, .y, radians(ship.yaw));
-    turn = math.turned(turn, .x, radians(ship.pitch));
-    return math.turned(turn, .z, radians(ship.roll));
+    const turn = yawPitch(@floatFromInt(ship.yaw), @floatFromInt(ship.pitch));
+    return math.turned(turn, .z, std.math.degreesToRadians(@as(f32, @floatFromInt(ship.roll))));
 }
 
-fn radians(degrees: i16) f32 {
-    return std.math.degreesToRadians(@as(f32, @floatFromInt(degrees)));
+/// Turned by `yaw` about Y, then by `pitch` about X, in degrees, as `object_orient_by_record` turns
+/// a ship and the director's camera turns (`mat3_turn_y`, `mat3_turn_x`).
+///
+/// **Improvement:** the degrees are turned into radians exactly, where the game multiplies by a
+/// rounded pi/180 (`0x004DC71C`).
+pub fn yawPitch(yaw: f32, pitch: f32) math.Matrix {
+    const turn = math.turned(math.identity, .y, std.math.degreesToRadians(yaw));
+    return math.turned(turn, .x, std.math.degreesToRadians(pitch));
 }
 
 test "Loaded.tickClock" {

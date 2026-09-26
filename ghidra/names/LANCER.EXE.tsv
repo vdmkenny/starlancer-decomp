@@ -86,8 +86,8 @@ address	kind	name	type	comment
 005294f0	data	mission_squads_count	ushort	
 00529500	data	mission_squad_members	SquadMember *	Section 13
 00529520	data	mission_squad_members_count	ushort	
-00525fb0	data	mission_sub_objects		Section 16, 0x44 bytes each
-005267c4	data	mission_sub_objects_count	ushort	
+00525fb0	data	mission_curves	Curve *	Section 16: the mission's curves, 0x44 bytes each
+005267c4	data	mission_curve_count	ushort	
 005294ec	data	mission_parts_b	MissionPart *	Section 17
 00529508	data	mission_parts_b_count	ushort	
 00525fb4	data	mission_script_b	byte *	Section 18
@@ -1612,3 +1612,52 @@ address	kind	name	type	comment
 0040aa50	function	escort_count_place	bool __fastcall (int slot, OrderTarget *target)	Escort's walk: counts the ship off the place still to go (OrderState +0x00), and once it goes below nothing takes the ship as the one to escort (+0x04)
 0040ae90	function	find_target_weigh	bool __fastcall (int slot, OrderTarget *target)	Find New Target's walk: weighs a ship the searcher can aim at by the square of its distance, times the ships whose current order fights it, and mills round it, keeping the lightest to fight (+0x04) and to mill round (+0x10); never ends the walk
 00401810	function	object_has_stats	bool __fastcall (int slot)	Whether the object in the slot is of a type with stats: below 0x100
+00450d10	function	director_begin_shot	void __fastcall (void *path, MissionShip *tracked, float seconds, MissionShip *pace)	Begins a shot of the director's camera: the ship it looks at and the one its path rides along with, its seconds in ticks and its path's length, then its first curve
+00450d90	function	director_begin_curve	void __fastcall (Curve *curve, char first)	Begins a curve of the director's path for its share of the shot's ticks, turning from its start ship's angles to its end ship's; the shot's first switches to view 13
+00450f20	function	director_curve_end	void __stdcall (float t)	At t of 1 or more: CameraReached on the curve's end ship, then the curve that carries the path on, or view 0
+00450fa0	function	director_frame	void (void)	The director's camera for a frame in view 13: the curve runs on, the camera stands at its point and looks at the tracked ship or turns by the angles
+004510c0	function	director_progress	float10 __fastcall (void *director, Vec3 *position, float *t, void *unused, float *progress)	How far along its curve the director's camera is: places it, and posts CameraReached for a place a point marks that it passes
+004511a0	function	director_place	void __fastcall (void *director, Curve *curve, float t, Vec3 *position, char exact)	Where the director's camera stands t of the way along its curve, or at its still ship, carried with the ship its path rides along with
+00456f00	function	curve_weights_fill	void (void)	Fills curve_weights with the four Hermite weights at each 32nd of the way
+00456f70	function	curve_point_stepped	void __fastcall (Curve *curve, Vec3 *point, float t)	A curve's point t of the way along, weighed from curve_weights at the 32nd below t
+00456fb0	function	curve_axis_stepped	float10 __fastcall (Curve *curve, int axis, float t)	One component of curve_point_stepped
+00457050	function	curve_point	void __fastcall (Curve *curve, Vec3 *point, float t)	A curve's point t of the way along: a cubic Hermite spline, each tangent weighed ten times
+00457090	function	curve_axis	float10 __fastcall (Curve *curve, int axis, float t)	One component of curve_point
+00457130	function	hermite_from	float10 __stdcall (float t)	2t^3 - 3t^2 + 1, the weight of a curve's start
+00457160	function	hermite_to	float10 __stdcall (float t)	3t^2 - 2t^3, the weight of a curve's end
+00457190	function	hermite_leaving	float10 __stdcall (float t)	t^3 - 2t^2 + t, the weight of a curve's leaving tangent
+004571b0	function	hermite_arriving	float10 __stdcall (float t)	t^3 - t^2, the weight of a curve's arriving tangent, turned about
+004571d0	function	curve_starting_at	Curve * __fastcall (MissionShip *ship)	The first curve that starts at a ship, or null
+00457200	function	curve_next	Curve * __fastcall (Curve *curve, MissionShip *ship, char starting_only)	The curve that carries a path on from a ship: the first other that starts there, or unless starting_only ends there
+00457250	function	curve_length	float10 __fastcall (Curve *curve)	A curve's length, over the whole of it
+00457260	function	curve_length_between	float10 __fastcall (Curve *curve, float from, float to)	The sum of the chords between a curve's points at each 32nd of the way from one share to another
+00457320	function	curve_path_length	float10 __fastcall (Curve *curve)	The length of the path from a curve through those that carry it on, up to one that ends at no ship
+00457380	function	curves_rebuild	void (void)	Makes every curve afresh from its ships
+004573b0	function	curve_rebuild	void __fastcall (Curve *curve)	Makes a curve afresh from its four ships' places, unless 0x0052A1D0 is set
+00457460	function	curve_init	void __fastcall (Curve *curve, Vec3 *from, Vec3 *to)	A curve from one point to another that names no ships, with no tangents
+004574a0	function	curve_ride	void __fastcall (MissionShip *ship, Vec3 *point, Vec3 *start, char still)	Carries a point of a path along with a ship: by how far start lies from where the mission placed it, and unless still by its move since
+00457510	function	curve_next_marker	float10 __fastcall (Curve *curve, MissionShip **passed, float after)	The nearest share past after that a point marks on a curve, 0 for none, and the last point that marks after itself
+004524e0	function	curve_index	uint __fastcall (Curve *curve)	Index of a curve record
+0045ec40	function	camera_hold_ships	void __fastcall (int kind, int index, char hold)	Marks each ship of a ship, flight group or squad jumping, or lets them go: the ships a director's shot holds still
+0045ead0	function	camera_hold_squad	void __fastcall (int squad, char hold)	camera_hold_ships for each member of a squad
+0045f170	function	camera_shot_start	void (void)	Begins the first of the director's shots waiting: notes the ships it holds, then director_begin_shot
+00461d30	function	camera_shot_stack	void __fastcall (void *path, MissionShip *tracked, float seconds, MissionShip *pace, int kind, int index)	Adds a shot for the director's camera after those waiting, and begins it where none waited
+00529fc0	data	curve_weights	float[132]	The four Hermite weights at each 32nd of the way, 33 sets (curve_weights_fill)
+00525210	data	director_yaw	float[2]	The yaw the director's camera turns from and to over its curve, in degrees
+00525218	data	director_pitch	float[2]	The pitch the director's camera turns from and to over its curve, in degrees
+00525220	data	director_curve	Curve *	The curve the director's camera flies along
+00525244	data	director_tracked	MissionShip *	The ship the director's camera looks at, or null
+0052524c	data	director_elapsed	uint	Ticks since the director's curve began
+00525250	data	director_ticks	int	The director's shot's ticks: its seconds, whole, times 100
+00525254	data	director_path_length	float	The length of the director's path
+00525258	data	director_curve_ticks	int	The director's curve's share of its shot's ticks
+0052525c	data	director_pace_start	Vec3	Where the ship the director's path rides along with stood as the shot began
+00525268	data	director_pace	MissionShip *	The ship the director's path rides along with, or null
+0052526c	data	director_next_marker	float	The share of the way along the director's curve to the next place a point marks, 0 for none
+00525270	data	director_still	MissionShip *	The ship the director's camera stands at in a shot with no curve
+00539940	data	camera_shots	uint[60]	The director's shots waiting, ten of 24 bytes: path, tracked ship, seconds, pace ship, and the kind and index of what it holds
+00539a58	data	camera_shot_count	int	How many of the director's shots wait
+00539a5c	data	camera_shot_hold_kind	int	The kind of what the first shot holds still: 0 a ship, 1 a flight group, 2 a squad
+00539938	data	camera_shot_hold_index	int	The index of what the first shot holds still
+00539a30	data	camera_held_kind	int	The kind of what the shot on screen holds still
+00539a40	data	camera_held_index	int	The index of what the shot on screen holds still

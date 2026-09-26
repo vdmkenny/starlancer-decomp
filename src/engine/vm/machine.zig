@@ -9,9 +9,7 @@
 //! too, and a thread's frame is its place on the thread's own stack. Where the game would fault, or
 //! read past a table, OpenReliant ends the thread and logs why.
 //!
-//! Not ported: the script debugger that `vm_run` serves, and what `mission_script_start` does
-//! beyond the VM (the table of curve weights `0x00456F00` fills, and the objects it creates for the
-//! ships the mission launches).
+//! Not ported: the script debugger that `vm_run` serves.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -239,7 +237,8 @@ pub const Machine = struct {
     /// events emptied, the clock, the timers, the threads and the tags reset, the handlers' verdict
     /// and the last jump's time too, and the timers set running. Then each start part runs, every
     /// object's triggers are armed, and each ship's Destroyed flag is cleared and its components
-    /// all intact.
+    /// all intact; where a curve starts at the ship, the first such curve's ships are made where
+    /// the start part has not made them (`executor.createCurveShips`).
     pub fn start(machine: *Machine) !void {
         const file = machine.mission.file;
         machine.gpa.free(machine.event_values);
@@ -265,9 +264,13 @@ pub const Machine = struct {
             const first = @min(object.first, triggers.len);
             for (triggers[first..@min(first + object.count, triggers.len)]) |*trigger| trigger.armed = 1;
         }
-        for (try machine.mission.ships()) |*ship| {
+        const curves = try file.curves();
+        for (try machine.mission.ships(), 0..) |*ship, index| {
             ship.flags = .{ .destroyed = false, ._unknown = 0 };
             ship.intact_components = std.math.maxInt(u32);
+            const game = machine.game orelse continue;
+            const curve = executor.curves.starting(curves, @intCast(index)) orelse continue;
+            executor.createCurveShips(game, machine.mission, curves[curve]);
         }
     }
 
@@ -518,6 +521,11 @@ pub const Machine = struct {
     /// `squad_index` (`0x00453070`): the same for a squad.
     pub fn squadIndex(machine: *const Machine, place: u32) ?u16 {
         return machine.recordIndex(.squads, place);
+    }
+
+    /// `0x004524E0`: the same for a curve.
+    pub fn curveIndex(machine: *const Machine, place: u32) ?u16 {
+        return machine.recordIndex(.curves, place);
     }
 
     fn recordIndex(machine: *const Machine, section: dte.Section, place: u32) ?u16 {
@@ -774,7 +782,7 @@ pub const Machine = struct {
             },
             .push_flight_group => try thread.push(machine.recordPlace(.flight_groups, try machine.operand(thread))),
             .push_squad => try thread.push(machine.recordPlace(.squads, try machine.operand(thread))),
-            .push_sub_object => try thread.push(machine.recordPlace(.sub_objects, try machine.operand(thread))),
+            .push_curve => try thread.push(machine.recordPlace(.curves, try machine.operand(thread))),
             .push_section_19 => try thread.push(machine.recordPlace(.unused_19, try machine.operand(thread))),
             .push_byte, .push_byte_alt => try thread.push(try machine.operand(thread)),
             .push_percent => {
@@ -1129,6 +1137,7 @@ pub const testing = struct {
         squad_members: []const dte.SquadMember = &.{},
         /// Each trigger's block is a part's, as `link` names it (`Fixture.link`).
         triggers: []const dte.Trigger = &.{},
+        curves: []const dte.Curve = &.{},
     };
 
     pub const Fixture = struct {
@@ -1170,6 +1179,7 @@ pub const testing = struct {
             section(&sections, .squads, records.squads.len, std.mem.sliceAsBytes(records.squads));
             section(&sections, .squad_members, records.squad_members.len, std.mem.sliceAsBytes(records.squad_members));
             section(&sections, .triggers, records.triggers.len, std.mem.sliceAsBytes(records.triggers));
+            section(&sections, .curves, records.curves.len, std.mem.sliceAsBytes(records.curves));
             const image = try write.write(gpa, &sections, .{});
             fixture.mission = try .bind(gpa, image);
             fixture.random = .{};

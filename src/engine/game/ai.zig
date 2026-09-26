@@ -542,7 +542,7 @@ test eachShip {
 /// a global, since `GameObject` holds the binary's own 32-bit pointers.
 pub fn cruiseSpeed(object: *const gameobj.GameObject, flight: *const create.FlightModel, view: camera.View) f32 {
     var speed = flight.max_speed * object.speed_factor * object.engines_intact;
-    if (view != ._unknown_13 and object.invulnerable == .none) speed *= object.armor_speed_factor;
+    if (view != .director and object.invulnerable == .none) speed *= object.armor_speed_factor;
     return speed;
 }
 
@@ -562,7 +562,7 @@ test cruiseSpeed {
     object.armor_speed_factor = 0.8;
     try std.testing.expectEqual(128, cruiseSpeed(&object, &gameobj.testing.flight, .chase));
     // The armor tells in every view but 13, and not at all while it is invulnerable.
-    try std.testing.expectEqual(160, cruiseSpeed(&object, &gameobj.testing.flight, ._unknown_13));
+    try std.testing.expectEqual(160, cruiseSpeed(&object, &gameobj.testing.flight, .director));
     object.invulnerable = .player_can_hit;
     try std.testing.expectEqual(160, cruiseSpeed(&object, &gameobj.testing.flight, .chase));
 }

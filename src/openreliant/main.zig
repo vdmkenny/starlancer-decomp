@@ -902,6 +902,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
             .cockpit_mode = view.cockpit_mode,
             .jumping_in = player.jumping_in,
             .last_view = last_view,
+            .cut = view.cut,
             .overlay = display.overlay(),
             .cockpit = if (cockpit.shown) |*shown| &shown.model else null,
             // The paused frame hides the radar's backing, whose radar the menu stands in place of.
@@ -934,6 +935,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
             },
         }, driver.interface());
         last_view = view.view;
+        view.cut = false;
         // What the menu's choice ends the pause in, as `mission_paused_frame` acts on it: the
         // mission starts again for RESTART, and LEAVE MISSION leaves it.
         if (pause_menu.outcome()) |outcome| {

@@ -51,6 +51,7 @@ pub const exported = [_]Export{
     .{ "MissionPartFlags", dte.Part.Flags },
     .{ "Squad", dte.Squad },
     .{ "SquadMember", dte.SquadMember },
+    .{ "Curve", dte.Curve },
 
     // The script VM.
     .{ "VmHandler", engine.vm.Handler },

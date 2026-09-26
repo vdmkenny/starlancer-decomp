@@ -1446,7 +1446,7 @@ pub fn playerWeapons(world: gameobj.World, devices: *Devices, index: u16) void {
     } else {
         world.player.mouse_launched = false;
     }
-    if (devices.active(.cloak_ship, true) and world.view != ._unknown_13 and cloak.canCloak(slot)) {
+    if (devices.active(.cloak_ship, true) and world.view != .director and cloak.canCloak(slot)) {
         const settled = if (slot.cloak) |cloaking| !cloaking.changing else true;
         const on = !object.flags.cloaked;
         setCloak(world, on);

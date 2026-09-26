@@ -13,6 +13,7 @@ const vm = @import("../vm.zig");
 const input = @import("../input.zig");
 const ai = @import("ai.zig");
 const aigeneric = @import("aigeneric.zig");
+const camera = @import("camera.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const hud = @import("hud.zig");
@@ -23,6 +24,8 @@ const pilots = @import("pilots.zig");
 const Order = @import("ai/orders.zig").Order;
 
 pub const commands = @import("executor/commands.zig");
+pub const curves = @import("executor/curves.zig");
+pub const director = @import("executor/director.zig");
 
 const Call = vm.machine.Call;
 
@@ -87,6 +90,10 @@ const implementations = table: {
         .{ "SetFlybackMarker", setFlybackMarker },
         .{ "ResetFlybackMarker", resetFlybackMarker },
         .{ "MatchSpeed", matchSpeed },
+        .{ "StartDirectorCam", startDirectorCam },
+        .{ "StackDirectorCam", stackDirectorCam },
+        .{ "StopDirectorCam", stopDirectorCam },
+        .{ "WaitForDirectorCam", waitForDirectorCam },
     }) |pair| table[commandIndex(pair[0])] = pair[1];
     break :table table;
 };
@@ -112,7 +119,7 @@ fn createFlightGroup(call: Call) u32 {
 /// `mission_ship_create` makes a `gameobj.Type.marker` of.
 fn isMarker(kind: u16) bool {
     return switch (kind) {
-        nav_point_kind, dte.Ship.waypoint_kind, 0x3E4, 0x3E3 => true,
+        nav_point_kind, dte.Ship.waypoint_kind, dte.Ship.curve_point_kind, dte.Ship.point_kind => true,
         else => false,
     };
 }
@@ -168,6 +175,20 @@ pub fn createShip(game: aigeneric.Context, bound: *const mission.Mission, index:
         break;
     };
     if (ship.pilotRecord()) |pilot| pilots.setPilot(&slot.object, pilot);
+}
+
+/// `mission_script_start`'s making of the ships of `curve` (`0x0045CD71`): the ship it starts at,
+/// those its tangents are drawn to, and the ship it ends at, each where its slot holds no object
+/// made yet (`createShip`).
+///
+/// **Fix:** the game takes the object past its array for a curve that names no ship; OpenReliant
+/// passes over it.
+pub fn createCurveShips(game: aigeneric.Context, bound: *const mission.Mission, curve: dte.Curve) void {
+    const all = game.world.objects;
+    for ([_]dte.Reference{ curve.start, curve.leaving_handle, curve.arriving_handle, curve.end }) |ship| {
+        if (ship.index >= all.slots.len or all.slots[ship.index].object.created) continue;
+        createShip(game, bound, ship.index);
+    }
 }
 
 /// The type `mission_ship_create` asks for a mission ship of: its kind, save that from
@@ -811,6 +832,69 @@ fn matchSpeed(call: Call) u32 {
     return 1;
 }
 
+/// `cmd_StartDirectorCam` (`0x004582E0`, command `0x10`): the director's shots waiting are
+/// dropped, and the camera takes this one at once (`stackDirectorCam`).
+fn startDirectorCam(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const view = game.world.camera orelse return 1;
+    view.shots.count = 0;
+    return stackDirectorCam(call);
+}
+
+/// `cmd_StackDirectorCam` (`0x00458300`, command `0x52`): the director's camera takes the shot the
+/// arguments give after those waiting (`camera.shots.stack`): the curve its path starts along, or
+/// the ship it stands at; the ship it looks at; its seconds; the ship its path rides along with;
+/// and the ship, flight group or squad it holds still while it is on screen.
+fn stackDirectorCam(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const view = game.world.camera orelse return 1;
+    camera.shots.stack(game.world, view, directorShot(call.machine, call.args));
+    return 1;
+}
+
+/// The shot `StackDirectorCam`'s arguments `args` give. The first names a curve unless it names one
+/// of the mission's records, which it takes for a ship's (`record_kind`, `ship_index`), and the
+/// seconds are a whole number.
+fn directorShot(machine: *vm.Machine, args: []const u32) camera.shots.Shot {
+    const path: ?camera.shots.Shot.Path = if (machine.recordKind(args[0]) != null)
+        if (machine.shipIndex(args[0])) |ship| .{ .ship = ship } else null
+    else if (machine.curveIndex(args[0])) |curve| .{ .curve = curve } else null;
+    const held: ?aigeneric.Target = if (machine.recordKind(args[4])) |kind| switch (kind) {
+        .ship => if (machine.shipIndex(args[4])) |ship| .at(ship, null) else null,
+        .flight_group => if (machine.flightGroupIndex(args[4])) |group| .{ .kind = .flight_group, .index = @bitCast(group), .component = aigeneric.Target.whole } else null,
+        .squad => if (machine.squadIndex(args[4])) |squad| .{ .kind = .squad, .index = @bitCast(squad), .component = aigeneric.Target.whole } else null,
+        _ => null,
+    } else null;
+    return .{
+        .path = path,
+        .tracked = machine.shipIndex(args[1]),
+        .seconds = @floatFromInt(args[2]),
+        .pace = machine.shipIndex(args[3]),
+        .held = held,
+    };
+}
+
+/// `cmd_StopDirectorCam` (`0x00458E30`, command `0x24`): the camera goes back to the player's
+/// cockpit, forced, unless the player's slot holds a stand-in. The shots waiting stay.
+fn stopDirectorCam(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const view = game.world.camera orelse return 1;
+    const all = game.world.objects;
+    if (all.slots[all.player].object.type != .stand_in) _ = view.setView(.cockpit, all.player, false, true, game.clock.viewTime());
+    return 1;
+}
+
+/// `cmd_WaitForDirectorCam` (`0x00459C90`, command `0x50`): the thread waits while the camera is in
+/// the director's view, running the command again each time.
+fn waitForDirectorCam(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const view = game.world.camera orelse return 1;
+    return if (view.view == .director) call.again(director_wait_back) else 1;
+}
+
+/// How far back `WaitForDirectorCam` runs again: over itself.
+const director_wait_back = 2;
+
 /// A command's implementation. `args` points at its first argument on the stack. The result is
 /// stored in `Thread.result`, and a zero result also ends the handler loop.
 pub const Command = Code("uint __fastcall (byte **ip, uint *args)");
@@ -1264,6 +1348,85 @@ test shipType {
     try std.testing.expectEqual(gameobj.Type.grendel, shipType(all, &bound, ships[1]));
     all.mission_number = create.kamov_mission;
     try std.testing.expectEqual(gameobj.Type.kamov, shipType(all, &bound, ships[0]));
+}
+
+test "the director's commands stack shots, wait for them and stop them" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    try routine.op(.push_flight_group, &.{0});
+    try routine.command("CreateFlightGroup");
+    // Along the curve for a second, looking at the Sabre, the player's flight group held still.
+    try routine.op(.push_curve, &.{0});
+    try routine.op(.push_ship, &.{3});
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.push_null, &.{});
+    try routine.op(.push_flight_group, &.{0});
+    try routine.command("StartDirectorCam");
+    try routine.command("WaitForDirectorCam");
+    try routine.op(.select_global, &.{0});
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.assign, &.{});
+    // Then at the Sabre for five seconds, stopped at once.
+    try routine.op(.push_ship, &.{3});
+    try routine.op(.push_null, &.{});
+    try routine.op(.push_byte, &.{5});
+    try routine.op(.push_null, &.{});
+    try routine.op(.push_null, &.{});
+    try routine.command("StackDirectorCam");
+    try routine.command("StopDirectorCam");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    const point = dte.Ship.curve_point_kind;
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .globals = &.{0},
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, dte.Ship.no_flight_group, point, dte.Ship.no_pilot),
+            testShip(2, dte.Ship.no_flight_group, point, dte.Ship.no_pilot),
+            testShip(3, 0, @intFromEnum(gameobj.Type.sabre), 42),
+        },
+        .flight_groups = &.{testGroup(4, 0)},
+        .curves = &.{curves.testCurve(1, 2, .{ 0, 0, 0 }, .{ 0, 0, 1000 })},
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    var view: camera.Camera = .{};
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    game.world.mission = &fixture.mission;
+    game.world.camera = &view;
+    fixture.machine.game = game;
+    try fixture.machine.start();
+
+    // The curve's points are made as markers, the start part having left them.
+    const all = world.objects;
+    for (all.slots[1..3]) |slot| try std.testing.expectEqual(gameobj.Type.marker, slot.object.type);
+    // The shot on screen, the flight group held, and the script waiting for it.
+    try std.testing.expectEqual(camera.View.director, view.view);
+    try std.testing.expectEqual(3, view.director.tracked);
+    try std.testing.expectEqual(100, view.director.total);
+    for ([_]u16{ 0, 3 }) |ship| try std.testing.expect(all.slots[ship].object.flags.jumping);
+    fixture.second();
+    try std.testing.expectEqual(0, fixture.global(0));
+    const seen: camera.Subject = .{ .position = @splat(0), .orientation = @import("../surrender/math.zig").identity };
+    world.clock.frame_duration = 100;
+    _ = view.frame(.{ .object = seen, .player = seen, .ticks = 100, .game = game.world });
+    try std.testing.expectEqual(camera.View.cockpit, view.view);
+    for ([_]u16{ 0, 3 }) |ship| try std.testing.expect(!all.slots[ship].object.flags.jumping);
+    // Over, the script runs on: the next shot begins and is stopped, and stays stacked.
+    fixture.second();
+    try std.testing.expectEqual(1, fixture.global(0));
+    try std.testing.expectEqual(camera.View.cockpit, view.view);
+    try std.testing.expectEqual(1, view.shots.count);
+    try std.testing.expectEqual(camera.shots.Shot.Path{ .ship = 3 }, view.shots.first().?.path.?);
 }
 
 test {

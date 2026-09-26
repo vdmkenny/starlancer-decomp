@@ -463,7 +463,7 @@ pub fn engineUpdate(sound: *Sound, scene: Scene) void {
         },
         _ => {},
     }
-    if (scene.view == ._unknown_13) {
+    if (scene.view == .director) {
         driver.set3DSampleVolume(sound.voices_3d[engine].sample, 0);
         if (sound.burner_voice) |own| driver.set3DSampleVolume(sound.voices_3d[own].sample, 0);
     }

@@ -60,7 +60,7 @@ Each frame (`stars_project`, `0x004C5380`):
 - a star moving more than a pixel since last frame is a line back to where it was, the tail at half brightness, cut to 0.1 view units (position over depth, before the viewport's scale); otherwise a point;
 - its brightness is `1 / (100m + 1)`, `m` its motion in view units, `|dx| + |dy|`.
 
-After a camera cut, `backdrop_reset_streaks` (`0x004A5C80`) stops the next frame drawing streaks.
+After a camera cut, `backdrop_reset_streaks` (`0x004A5C80`) stops the next frame drawing streaks: `camera_set_view` calls it on every switch, and `mission_frame` once the view differs from the last frame's (`camera_view_last`, `0x00539A64`).
 
 ## Dust
 

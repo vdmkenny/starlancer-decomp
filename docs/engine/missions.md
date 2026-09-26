@@ -85,7 +85,8 @@ Before each mission, the loading (`0x004AD0A0`) puts a stand-in in every object'
    picked up;
 2. loads the cockpit of the loadout's ship (`player_loadouts`, `0x00588400`);
 3. binds the mission, whose binding ends by starting the script's clock and the script
-   (`mission_script_start`): the start part runs, and its commands make the mission's first ships;
+   (`mission_script_start`): the start part runs, and its commands make the mission's first ships,
+   and then its curves' ships;
 4. keeps the ships' records where their objects are (`mission_ships_sync`), sets the script's clock
    back to 0 and the object count to the mission's ship count, so that the objects and the mission's
    ships share their numbers, and runs the frame's mission work once (`process_mission`);

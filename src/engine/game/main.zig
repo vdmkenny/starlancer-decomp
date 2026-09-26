@@ -260,6 +260,8 @@ pub const Frame = struct {
     jumping_in: bool = false,
     /// Last frame's view (`camera_view_last`, `0x00539A64`).
     last_view: camera.View,
+    /// Whether the camera has switched view since the last frame drawn (`camera.Camera.cut`).
+    cut: bool = false,
     /// What the models' own lights and engine glows are drawn by; each object's own offset into
     /// its lights' blinks and its glow come from its record.
     attachments: objects.View = .{},
@@ -460,6 +462,7 @@ pub fn controlsFrame(controls: Controls) void {
         .forces = controls.forces,
         .dropping = launch.dropping(all, all.player),
         .showing = &world.player.showing,
+        .game = world,
     })) |next| {
         _ = view.setView(next, all.player, false, true, at);
     }
@@ -675,7 +678,7 @@ pub fn frameObjects(all: *create.Objects, timing: objects.Timing, now: i32) void
 
 /// Puts the frame's scene together and draws it, in `mission_frame`'s order: the objects
 /// (`drawObjects`), the backdrop, the sky; the star streaks are reset when the view has changed
-/// since the last frame; then `sr_render`. `arena` holds what the frame needs until it is drawn.
+/// since the last frame, or the camera has switched view (`camera_set_view`); then `sr_render`. `arena` holds what the frame needs until it is drawn.
 pub fn drawFrame(gpa: Allocator, arena: Allocator, scene: *srcore.Scene, context: *srapi.Context, frame: Frame, driver: srcore.Driver) Allocator.Error!void {
     scene.clear();
     // How far off an object stops being worth drawing follows the frame's own projection, so the
@@ -732,7 +735,7 @@ pub fn drawFrame(gpa: Allocator, arena: Allocator, scene: *srcore.Scene, context
             }
         }
     }
-    if (frame.view != frame.last_view) frame.space.resetStreaks();
+    if (frame.view != frame.last_view or frame.cut) frame.space.resetStreaks();
     try srcore.render(arena, context, scene, driver, frame.overlay);
 }
 
@@ -1388,8 +1391,9 @@ const camera_marker_at: math.Vector = .{ 0, 0, -8000 };
 /// debris (`guns_load_shell`, `explosions_init`), and clears the mark of the player's ship jumping
 /// in (`jump_init`). Then the start:
 /// 1. ends the 3D sounds, has the mission play with everything shown, no ship the player launched
-///    from, no primary target, the camera in the cockpit mode the options' setting picks and the
-///    ejected pilot always picked up, and puts back the pilot's kills (`winmain.startMission`);
+///    from, no primary target, the camera free in view 0 on the player's ship, in the cockpit mode
+///    the options' setting picks, and the ejected pilot always picked up, and puts back the pilot's
+///    kills (`winmain.startMission`);
 /// 2. binds the mission, whose records the orders then reach (`gameobj.World.mission`), and starts
 ///    its script (`mission.Loaded.start`), whose start part makes the mission's first ships and
 ///    gives them their orders, a launch among them;
@@ -1444,7 +1448,12 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     world.player.jumping_in = false;
     world.player.flyback = .{};
     world.player.primary_target = null;
-    if (world.camera) |view| view.cockpit_mode = view.setting.mode();
+    if (world.camera) |view| {
+        view.view = .cockpit;
+        view.object = all.player;
+        view.locked = false;
+        view.cockpit_mode = view.setting.mode();
+    }
     winmain.startMission(world.player);
     all.mission_number = number;
     const loaded = try Loaded.create(gpa, image, world.random);

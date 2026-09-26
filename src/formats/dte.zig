@@ -59,7 +59,9 @@ pub const Section = enum(u8) {
     formations = 14,
     /// The points of the formations, stride `0x10` (`order_formation_regroup_init`).
     formation_points = 15,
-    sub_objects = 16,
+    /// The curves, stride `0x44` ([`Curve`]): paths from one of the mission's ships to another,
+    /// which the director's camera flies along.
+    curves = 16,
     /// Part descriptors for `script_b`, in the same form as `parts`.
     parts_b = 17,
     /// A second bytecode section, counted in halfwords like `script`. Empty in every shipped
@@ -102,7 +104,7 @@ pub const Section = enum(u8) {
             .flight_groups => @sizeOf(FlightGroup),
             .parts, .parts_b => @sizeOf(Part),
             .triggers => @sizeOf(Trigger),
-            .sub_objects => 0x44,
+            .curves => @sizeOf(Curve),
             .ships => @sizeOf(Ship),
             .unused_20, _ => null,
         };
@@ -210,7 +212,13 @@ pub const Ship = extern struct {
     /// The loadout tier its missile racks are fitted by (`create_object`), as `create.settledTier`
     /// settles it: 0 or 255, as most records hold, asks for the campaign's.
     tier: u8,
-    _unknown_3e: [10]u8,
+    _unknown_3e: [2]u8,
+    /// For a point (`point_kind`) that marks a place on a curve: the curve's index, which
+    /// `markedCurve` gives, and the share of the way along it the place lies at, which the
+    /// director's camera reaches as it passes (`0x00457510`). -1 and 0 elsewhere.
+    marker_curve: i16,
+    _unknown_42: [2]u8,
+    marker_at: f32,
     runtime_roll: i16,
     roll: i16,
 
@@ -250,6 +258,19 @@ pub const Ship = extern struct {
         return ship.kind == waypoint_kind;
     }
 
+    /// The `kind` of a point the mission marks, such as where a ship jumps in, or a place on a
+    /// curve (`marker_curve`).
+    pub const point_kind: u16 = 0x3E3;
+
+    /// The `kind` of the points the curves run between, and of those their tangents are drawn to.
+    pub const curve_point_kind: u16 = 0x3E4;
+
+    /// The curve whose place it marks, where it is a point that marks one.
+    pub fn markedCurve(ship: Ship) ?u16 {
+        if (ship.kind != point_kind) return null;
+        return std.math.cast(u16, ship.marker_curve);
+    }
+
     pub const Flags = packed struct(u8) {
         /// Set when the engine raises the ship's Destroyed event, which it then raises no more.
         destroyed: bool,
@@ -268,7 +289,50 @@ pub const Ship = extern struct {
         assert(@offsetOf(Ship, "pitch") == 0x3A);
         assert(@offsetOf(Ship, "tier") == 0x3D);
         assert(@offsetOf(Ship, "roll") == 0x4A);
+        assert(@offsetOf(Ship, "marker_curve") == 0x40);
+        assert(@offsetOf(Ship, "marker_at") == 0x44);
         assert(@sizeOf(Ship) == 0x4C);
+    }
+};
+
+/// A curve, section `curves`: a cubic Hermite spline from one of the mission's ships to another,
+/// which leaves the first along one tangent and reaches the second along another. The director's
+/// camera flies along the curves, and one that starts where another ends carries its path on.
+/// Its points and tangents are the ships' places as the mission placed them, which the record
+/// keeps as they are while the mission runs.
+pub const Curve = extern struct {
+    /// The ship it starts at, and the ship it ends at, `Reference.unset` for none.
+    start: Reference,
+    end: Reference,
+    /// Where it starts and where it ends.
+    from: [3]f32,
+    to: [3]f32,
+    /// The ships its tangents are drawn to, one each side: `leaving` runs from `from` to the
+    /// first, and `arriving` from the second to `to`. `0x004573B0` makes the curve afresh from
+    /// the places of its four ships, on a message of the shared memory the game watches
+    /// (`0x00457730`).
+    leaving_handle: Reference,
+    arriving_handle: Reference,
+    /// Its tangents, each a tenth of its weight in the curve: the way it heads as it leaves its
+    /// start, and the way back from where it heads as it reaches its end.
+    leaving: [3]f32,
+    arriving: [3]f32,
+    _unknown_40: u32,
+
+    /// The ship it ends at, where it ends at one.
+    pub fn endShip(curve: Curve) ?u16 {
+        return if (curve.end.index == Reference.unset) null else curve.end.index;
+    }
+
+    comptime {
+        assert(@offsetOf(Curve, "end") == 0x04);
+        assert(@offsetOf(Curve, "from") == 0x08);
+        assert(@offsetOf(Curve, "to") == 0x14);
+        assert(@offsetOf(Curve, "leaving_handle") == 0x20);
+        assert(@offsetOf(Curve, "arriving_handle") == 0x24);
+        assert(@offsetOf(Curve, "leaving") == 0x28);
+        assert(@offsetOf(Curve, "arriving") == 0x34);
+        assert(@sizeOf(Curve) == 0x44);
     }
 };
 
@@ -829,8 +893,8 @@ pub const Opcode = enum(u8) {
     push_flight_group = 0x2D,
     /// A pointer to squad record `n`.
     push_squad = 0x44,
-    /// A pointer to record `n` of `sub_objects`.
-    push_sub_object = 0x49,
+    /// A pointer to curve record `n`.
+    push_curve = 0x49,
     /// A pointer to record `n` of section 19, which no mission uses.
     push_section_19 = 0x54,
     /// The operand byte itself. `0x2E` runs the same handler.
@@ -1338,6 +1402,10 @@ pub const Mission = struct {
 
     pub fn squads(mission: Mission) Error![]align(1) const Squad {
         return mission.records(Squad, .squads);
+    }
+
+    pub fn curves(mission: Mission) Error![]align(1) const Curve {
+        return mission.records(Curve, .curves);
     }
 
     /// For each trigger, the ID of the object whose slice holds it, or null when none does and

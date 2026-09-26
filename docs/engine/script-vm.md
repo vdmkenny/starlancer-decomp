@@ -39,7 +39,8 @@ clock has ticked since, runs the timers and checks the proximity conditions (`0x
 parts, whose blocks lie in the script, then section 17's, whose blocks lie in `script_b`. A part
 whose offset is `0xFFFF` has no block. `mission_script_start` (`0x0045CBC0`) runs each part flagged
 to run at the start, at once, before any trigger is armed; then it arms every object's triggers, and
-marks each ship not destroyed and all its components intact.
+marks each ship not destroyed and all its components intact, making the ships of the first curve
+that starts at it where the start part has not ([The director's camera](director.md#the-curves-ships)).
 
 ## The interpreter
 
@@ -169,6 +170,9 @@ Some of the commands mission 1 runs:
 | `IsShipThisPlayer` (`0x45`) | 1 where the argument names the player's ship, 2 otherwise |
 | `SetFlybackMarker` (`0x46`), `ResetFlybackMarker` (`0x47`) | Set the flyback markers afresh on each ship the first argument names, the second their reach, or drop them ([Display](hud.md#the-flyback-markers)) |
 | `MatchSpeed` (`0x4A`) | Where the first argument names the player's ship, MATCH SPEED turns on, matching at once where it already was, while the second is set, and off otherwise |
+| `StartDirectorCam` (`0x10`), `StackDirectorCam` (`0x52`) | The director's camera takes a shot along the mission's curves or at a ship, at once or after those waiting ([The director's camera](director.md#the-commands)) |
+| `StopDirectorCam` (`0x24`) | The camera goes back to the player's cockpit, forced |
+| `WaitForDirectorCam` (`0x50`) | Waits while the camera shows the director's shots (view 13) |
 
 ## The clock and timers
 
@@ -227,6 +231,7 @@ event that a trigger's thread posts as it runs at once waits its turn in the sam
 | ExplosionShip | `event_post_explosion` (`0x0045AB50`), with the groups, as the Uber Explode ends ([Effects](effects.md)) | The ship |
 | Cloaked, Decloaked | `object_cloak`, `object_uncloak` ([Cloak](cloak.md)) | None |
 | PlayerReadyToJump, PlayerReadyToWarp | `player_jump` (`0x00412B20`), on the player's ship | None |
+| CameraReached | `event_camera_reached` (`0x00451180`), as the director's camera reaches the end of a curve, or a place a point marks on it ([The director's camera](director.md#a-shot)) | None |
 | CloseProximity, Proximity, ShipReached | The watches (below) | The ship close by; for the first two, how far, in the subject's radii |
 
 A hit by an object that stands for no mission's ship posts no ShotAt: an object stands for the
@@ -411,9 +416,6 @@ one no record stands for, and stops at a squad that holds itself round. Cloaking
 stands for no mission's ship posts nothing, where the game faults. The watches' lists are as long as
 the mission needs, where the game writes them into tables of a fixed size without looking.
 
-Not ported: the script debugger, the table of curve weights `mission_script_start` fills
-(`0x00456F00`), and the ships the mission's sub-objects name, which it makes after the start part
-where the part has not (`0x004571D0`), with the sub-objects
-([#281](https://github.com/vdmkenny/openreliant/issues/281)); and the events that code OpenReliant
-does not run yet posts, such as FixedGateJumpedIn from the gates' jumps
+Not ported: the script debugger; and the events that code OpenReliant does not run yet posts, such
+as FixedGateJumpedIn from the gates' jumps
 ([#307](https://github.com/vdmkenny/openreliant/issues/307)).

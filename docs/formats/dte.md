@@ -52,7 +52,7 @@ the count says how much of the reserved room is filled, so most missions are exa
 | 13 | squad_members | `0x0C` | Squad membership records |
 | 14 | formations | 8 | Ship formations: the first of each one's points in section 15 at `+4` |
 | 15 | formation_points | `0x10` | The formations' points |
-| 16 | sub_objects | `0x44` | |
+| 16 | curves | `0x44` | The curves the director's camera flies along: see [Curves](#curves) |
 | 17 | parts_b | `0x1C` | Part descriptors for section 18 |
 | 18 | script_b | | A second bytecode section |
 | 21 | openreliant_name | 1 | **OpenReliant's own:** the mission's name, see [OpenReliant's mission name](#openreliants-mission-name) |
@@ -123,6 +123,8 @@ Stride `0x4C`, one per placed object, nav points included.
 | `0x30` | u32 | The ship's intact components, a bit each |
 | `0x34` | u16 | The formation point Formation Regroup flies the ship to, or `0xFFFF` for none |
 | `0x3D` | u8 | The loadout tier its missile racks are fitted by (`create.settledTier`): 0 or 255, as most records hold, asks for the campaign's |
+| `0x40` | i16 | For a point of kind `0x3E3`, the index of the curve it marks a place on, or -1 for none |
+| `0x44` | f32 | The share of the way along that curve the place lies at |
 
 When the mission's script starts, the engine clears the flags at `0x17` and sets every bit at
 `0x30`. Destroying component `n` of the ship clears bit `n & 31`, and destroying the ship sets bit 0
@@ -146,6 +148,26 @@ Stride `0x14`.
 
 Binding the mission works out `0x09` and `0x0C`, whatever the file holds
 ([Missions](../engine/missions.md#binding)).
+
+## Curves
+
+Stride `0x44`: a cubic Hermite spline from one of the mission's ships to another, which the
+director's camera flies along ([The director's camera](../engine/director.md)).
+
+| Offset | Type | Field |
+|---|---|---|
+| `0x00` | u32 | The ship it starts at, as a trigger operand names it ([Operands](#operands)) |
+| `0x04` | u32 | The ship it ends at, or `0xFFFF` in the low halfword for none |
+| `0x08` | f32 x3 | Where it starts |
+| `0x14` | f32 x3 | Where it ends |
+| `0x20` | u32 | The ship its leaving tangent is drawn to |
+| `0x24` | u32 | The ship its arriving tangent is drawn from |
+| `0x28` | f32 x3 | Its leaving tangent: from where it starts to the first of those ships |
+| `0x34` | f32 x3 | Its arriving tangent: from the second of them to where it ends |
+| `0x40` | u32 | **Unknown** |
+
+Its ships are points of kind `0x3E4` in the shipped missions, and the record holds their places as
+the mission placed them. The engine weighs each tangent ten times as it stands.
 
 ## Objects
 
@@ -332,7 +354,7 @@ A stack machine. Names follow the handlers; `a` is the second value from the top
 | `0x2A` (`0x2B`) | `push_string` | Push a pointer to inline text and step over it |
 | `0x2C`, `0x52` | `push_ship`, `push_ship_wide` | Push a pointer to ship `n` |
 | `0x47` (`0x55`) | `push_component` | The same, naming the ship's component given by a second operand |
-| `0x2D`, `0x44`, `0x49`, `0x54` | `push_flight_group`, `push_squad`, `push_sub_object`, `push_section_19` | Push a pointer to record `n` of sections 4, 12, 16 and 19 |
+| `0x2D`, `0x44`, `0x49`, `0x54` | `push_flight_group`, `push_squad`, `push_curve`, `push_section_19` | Push a pointer to record `n` of sections 4, 12, 16 and 19 |
 | `0x32` (`0x2E`) | `push_byte` | Push the operand byte |
 | `0x2F` | `push_percent` | Push `n` percent of the top value |
 | `0x48` | `push_null` | Push `-1`, for parameters labelled "can be NULL" |

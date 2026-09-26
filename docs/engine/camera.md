@@ -42,6 +42,7 @@ OpenReliant keeps the factor down and chooses the factor across that keeps pixel
 | 0x21 | | From far below a launching ship, looking up at it | a space |
 | 0x22 | | From beside and below a launching ship, looking at it, the whole scene shown | a space |
 | 0x24 | Flyby | From a point the player flies past | a space |
+| 0xD | | Along the mission's curves, or at a ship, for the script's shots ([The director's view](#the-directors-view)) | a space |
 
 The view table (`camera_view_table`, `0x4F72A8`) holds four bytes a view, for views 0 to `0x2B`: the language string that names the view, whether cinematic bars slide in, and whether it is from the cockpit. [`camera/views.zig`](../../src/engine/game/camera/views.zig) transcribes it; `make view-tables` derives it again. The bars slide in for views 7 to `0x27` and `0x2B`, but not the external view; views 0 to 3 are from the cockpit. The names are strings 170 to 182 of `language.dll`; string 174, Chase Camera, is none of them, the chase views and most cutaways taking 181, a single space. From the cockpit the object's flag bit 0 is set, except in the chase mode, and cleared when the view moves off it. The bars grow by 0.001 of the screen a tick to 0.1, top and bottom; a view without them clears them at once.
 
@@ -150,5 +151,14 @@ OpenReliant's camera keeps its own place for them, as for the flyby and target v
 
 **Improvement:** with smooth motion, view `0x17` pulls away by the share of a tick the frame is
 drawn past its tick as well, as [the ejection's views](#the-ejections-views) do.
+
+## The director's view
+
+View 13 shows the shots a mission's script stacks for [the director's camera](director.md), which
+flies the camera along the mission's curves or stands it at a ship. The first shot switches to it,
+held and forced, and the director moves the camera each frame. Once the director has gone back to
+view 0, `camera_frame` ends the shot and begins the next waiting. `camera_set_view` holds the shot's
+ships still as it switches to the view, and lets them go as it switches away
+([The ships a shot holds](director.md#the-ships-a-shot-holds)).
 
 This page leaves out the cockpit's model and its motion, the shake from hits (`hit_shake`, `0x588724`) and the other cutaways.

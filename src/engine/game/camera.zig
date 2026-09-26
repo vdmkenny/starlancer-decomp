@@ -16,6 +16,9 @@ const Vector = math.Vector;
 
 /// The view table, which [`camera/views.zig`](camera/views.zig) transcribes.
 pub const views = @import("camera/views.zig");
+/// The director's shots, which the director's view shows.
+pub const shots = @import("camera/shots.zig");
+const director = @import("executor/director.zig");
 const Matrix = math.Matrix;
 
 /// Where the camera is and which way it looks.
@@ -89,10 +92,11 @@ pub const View = enum(u8) {
     target = 6,
     /// Around the player's ship, likewise.
     external = 0xC,
-    /// **Unknown:** what view 13 is. A ship keeps its undamaged speed in it (`ai.cruiseSpeed`),
-    /// the player's engine and afterburner are not heard (`sound3d`), and CLOAK SHIP does nothing
-    /// (`input.playerWeapons`).
-    _unknown_13 = 0xD,
+    /// The director's: the mission's script's shots (`shots`), each flown along the mission's
+    /// curves or standing at a ship, locked, the ships each holds kept still. A ship keeps its
+    /// undamaged speed in it (`ai.cruiseSpeed`), the player's engine and afterburner are not heard
+    /// (`sound3d`), and CLOAK SHIP does nothing (`input.playerWeapons`).
+    director = 0xD,
     /// Behind the camera's object, turning slowly with it and pulling away, as the player's ship is
     /// destroyed.
     pull_back = 8,
@@ -326,6 +330,9 @@ pub const World = struct {
     showing: ?*@import("main.zig").Showing = null,
     /// The force feedback the player's controller plays, which the shake from hits shakes too.
     forces: ?*input.force.Forces = null,
+    /// The game's world, through which the director's view flies along the mission's curves; null
+    /// where no game runs, as in a test.
+    game: ?gameobj.World = null,
 };
 
 /// The camera: the state `camera_set_view` and `camera_frame` keep in globals, and Surrender's
@@ -373,6 +380,18 @@ pub const Camera = struct {
     missiles: ?*const missiles.Missiles = null,
     missile: u8 = 0,
     missile_gone: bool = false,
+    /// The director's shots waiting, and what the director keeps of the one on screen.
+    shots: shots.Shots = .{},
+    director: director.Director = .{},
+    /// The ships the director's shot on screen holds still (`camera_held_kind`, `0x00539A30`, and
+    /// `camera_held_index`, `0x00539A40`), and those the first shot waiting holds, as the view
+    /// takes it (`camera_shot_hold_kind`, `0x00539A5C`, and `camera_shot_hold_index`,
+    /// `0x00539938`).
+    held: ?shots.Held = null,
+    holding: ?shots.Held = null,
+    /// Set as the view switches, which resets the star streaks (`backdrop_reset_streaks`), so that
+    /// the frame drawn next draws none, even where the view switches back to what it was.
+    cut: bool = false,
 
     /// Bars grow this share of the screen a tick, times their speed (`camera_frame`, `0x004DC418`).
     pub const bar_rate: f32 = 0.001;
@@ -382,7 +401,8 @@ pub const Camera = struct {
     /// places the camera at once, as `frame` does, and has the stars draw no streaks this frame.
     ///
     /// The missile view follows the next missile in flight, from the one it last followed, that
-    /// `object` launched; with none, it is refused.
+    /// `object` launched; with none, it is refused. Out of the director's view, the ships its shot
+    /// held go (`shots.Held.hold`), and into it, the shot's own are held.
     pub fn setView(camera: *Camera, view: View, object: ?u16, lock: bool, force: bool, now: u32) bool {
         if (camera.locked and !force) return false;
         if (view == .missile) {
@@ -390,6 +410,8 @@ pub const Camera = struct {
             camera.missile = nextMissile(records, camera.missile, object orelse return false) orelse return false;
             camera.missile_gone = false;
         }
+        if (camera.view == .director) if (camera.held) |held| held.hold(false);
+        camera.cut = true;
         if (view.letterboxed()) {
             camera.bar_speed = 1;
         } else {
@@ -407,6 +429,10 @@ pub const Camera = struct {
             .cockpit => if (camera.cockpit_mode == .chase) camera.chase.resetTurns(),
             .chase, .chase_too => camera.chase.resetTurns(),
             .target, .external => camera.orbit = .{},
+            .director => {
+                camera.held = camera.holding;
+                if (camera.held) |held| held.hold(true);
+            },
             else => {},
         }
         return true;
@@ -619,6 +645,15 @@ pub const Camera = struct {
             },
             .jump_in_ahead => {},
             .jump_in_aside => camera.place = lookingAt(camera.place.position, world.player.position),
+            // The director moves the camera on; once its shot is over, and the view with it, the
+            // next shot waiting begins.
+            .director => if (world.game) |game| {
+                director.frame(game, camera, world.ahead);
+                if (camera.view != .director) {
+                    camera.shots.pop();
+                    shots.start(game, camera);
+                }
+            },
             .watch => camera.place = lookingAt(camera.place.position, world.object.position),
             .watch_marker => if (world.marker) |marker| {
                 camera.place = lookingAt(camera.place.position, marker);
@@ -1067,7 +1102,7 @@ fn behind(point: Vector, orientation: Matrix, angle: f32, back: f32) Place {
 
 /// Standing at `at` and looking at `target`, with no roll (`mat3_look_at`): the views that watch a
 /// point from where they stand.
-fn lookingAt(at: Vector, target: Vector) Place {
+pub fn lookingAt(at: Vector, target: Vector) Place {
     return .{ .position = at, .orientation = math.lookAt(target - at) };
 }
 
@@ -1408,9 +1443,14 @@ test Camera {
     _ = camera.frame(.{ .object = ship, .player = ship, .ticks = 3 });
     try std.testing.expect(camera.place.position[2] > 1000);
 
-    // A locked camera refuses a switch unless forced; cutaways bring in the bars.
+    // A locked camera refuses a switch unless forced; cutaways bring in the bars. A switch that
+    // goes ahead is a cut, which the frame drawn next draws no streaks across.
+    camera.cut = false;
     try std.testing.expect(camera.setView(.pull_back, 0, true, false, 20));
+    try std.testing.expect(camera.cut);
+    camera.cut = false;
     try std.testing.expect(!camera.setView(.external, 0, false, false, 30));
+    try std.testing.expect(!camera.cut);
     try std.testing.expectEqual(1, camera.bar_speed);
     for (0..40) |_| _ = camera.frame(.{ .object = ship, .player = ship, .ticks = 3 });
     try std.testing.expectEqual(letterbox, camera.bars);

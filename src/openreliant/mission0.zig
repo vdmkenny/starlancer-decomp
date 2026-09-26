@@ -241,8 +241,9 @@ const no_triggers = 0xFFFF;
 /// **Unknown:** what it means.
 const group_tail = 0xFF19FFFF;
 
-/// The bytes after a ship's pitch (`_unknown_3c`, `tier`, `_unknown_3e`), as most of the ships of
-/// the game's missions have them: tier 255, which asks for the campaign's.
+/// The bytes after a ship's pitch (`_unknown_3c`, `tier`, `_unknown_3e`, the marker's curve and its
+/// place on it), as most of the ships of the game's missions have them: tier 255, which asks for
+/// the campaign's, and no curve.
 const ship_tail = [_]u8{ 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
 
 /// Ship `ship`'s record, as the game's missions have their ships': object ID `id`, named at

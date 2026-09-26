@@ -422,6 +422,14 @@ pub fn cloaked(world: gameobj.World, index: u16, on: bool) void {
     events.post(ship, .{ .condition = if (on) .cloaked else .decloaked });
 }
 
+/// `event_camera_reached` (`0x00451180`): the director's camera has reached mission ship `ship`,
+/// the end of the curve it flew or a point that marks a place on it. The ship's CameraReached, with
+/// no values, for its own triggers.
+pub fn cameraReached(world: gameobj.World, ship: u16) void {
+    const events = world.events orelse return;
+    events.post(ship, .{ .condition = .camera_reached });
+}
+
 /// JUMP DRIVE took the jump the mission had ready, or the warp (`player_jump`): the player's ship,
 /// the mission's first, has its PlayerReadyToJump or its PlayerReadyToWarp, with no values, for its
 /// own triggers.
@@ -568,6 +576,28 @@ test "JUMP DRIVE takes the jump the mission has ready" {
     try std.testing.expectEqual(1, mission.fixture.global(0));
     try std.testing.expectEqual(.no, machine.variables.ready.jump);
     try std.testing.expectEqual(7, machine.last_jumped);
+}
+
+test "the director's camera reaching a ship" {
+    const gpa = std.testing.allocator;
+    const code = try triggers.testing.counting(gpa, 0);
+    defer gpa.free(code);
+    const parts = [_]vm.machine.testing.Part{.{ .code = code }};
+    var mission: TestMission = undefined;
+    try mission.init(&parts, .{
+        .globals = &.{0},
+        .ships = &testShips(2),
+        .objects = &.{ triggers.testing.object(.ship, 0, 0), triggers.testing.object(.ship, 0, 1) },
+        .triggers = &.{triggers.testing.trigger(&parts, 0, .camera_reached, .always)},
+    }, &.{ @splat(0), @splat(0) });
+    defer mission.deinit();
+
+    // Only the ship whose trigger answers it has its CameraReached.
+    cameraReached(mission.world(), 0);
+    try std.testing.expectEqual(0, mission.events.count);
+    cameraReached(mission.world(), 1);
+    mission.events.flush();
+    try std.testing.expectEqual(1, mission.fixture.global(0));
 }
 
 test "the watches look for ships close by, while their triggers are armed" {

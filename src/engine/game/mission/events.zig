@@ -422,6 +422,15 @@ pub fn cloaked(world: gameobj.World, index: u16, on: bool) void {
     events.post(ship, .{ .condition = if (on) .cloaked else .decloaked });
 }
 
+/// `event_post_ship_reached` (`0x0045AC10`): the object in slot `index` has reached mission ship
+/// `ship`, the end of a curve it followed or a point that marks a place on one. The ship's
+/// ShipReached, with the ship of the object that reached it, for its own triggers.
+pub fn shipReached(world: gameobj.World, ship: u16, index: u16) void {
+    const events = world.events orelse return;
+    var values = [_]u32{events.value(index)};
+    events.post(ship, .{ .condition = .ship_reached, .values = &values });
+}
+
 /// `event_camera_reached` (`0x00451180`): the director's camera has reached mission ship `ship`,
 /// the end of the curve it flew or a point that marks a place on it. The ship's CameraReached, with
 /// no values, for its own triggers.

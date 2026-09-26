@@ -166,6 +166,27 @@ When avoidance moves the point, `ai_steer` steers with a limit of 1, no ease and
 `0x8`, and returns true. The lists are what [`avoidance_scan`](#avoidance) builds, and a ship with
 `no_avoidance` avoids nothing.
 
+### Arriving
+
+`ai_arrive` (`0x00402140`, `0x00402160`) brings a ship to a point, turned as an orientation, at a
+least throttle: Follow Curve arrives so at a path's start, and Dock and Formation use it too. It
+goes by where the ship stands next. Within 2000 of the point it has arrived: its throttle is the
+least it was given and its turning inputs nothing. Otherwise:
+
+- Behind the point along the way the orientation faces, within 18 degrees of that line, and itself
+  facing that way within 11, it steers at the point with `ai_steer`, flags `0x3`, and rolls to
+  stand as the orientation stands: its roll input is the roll between their up axes less 12 times
+  its roll rate, in degrees over 40.
+- Otherwise it steers with `ai_steer`, flags `0x3`, round the circle through it that meets the
+  orientation's line at the point, in the plane of that line and the ship: aiming half a radian
+  round the circle ahead of itself, or at the point once within the circle's last half radian.
+  The circle's radius is at least twice `speed_per_pitch_rate` (flight stats `+0x20`); standing
+  ahead of the point, the ship aims across the far side of the smallest.
+
+Either way its throttle is the way left, straight or round the circle, over 4 times its cruise
+speed through its inertia (`4 * cruise / (1 - inertia)`), less 0.1, and never less than the least
+it was given.
+
 ### Avoidance
 
 `avoidance_scan` (`0x00492190`) runs for each object in `mission_frame`'s pass that draws them, the
@@ -220,6 +241,8 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | Find New Target (10) | Walks the ships its target names, weighing each it can aim at, cloaked or not, by the square of its node's distance from where the ship will be next ([Picking a fight](#picking-a-fight)). It fights the lightest to fight, pushing Fight, or Torpedo (103) for a ship of the torpedo class; with none, it mills round the lightest to mill round, pushing Mill (120); with neither it pops. |
 | Object Attach (13) | On starting, keeps where the ship will stand next in the frame its target will stand in next. Each update it puts the ship there in the target's next frame, turned as the target will be, and gives it the target's turn, velocity, speed and rates of turn, so that it rides the target. |
 | Toggle Cloak (16) | One-shot: cloaks or uncloaks the ship if its model's header allows a cloak, and the ships being launched from it do the same. |
+| Ship Follow Curve (17) | Flies the path of the mission's curves from the curve in its data ([Following a path](#following-a-path)). |
+| Ship Follow Curve Backwards (119) | Flies that path backwards, from its end to its start. |
 | Slow Rotate (18) | Zero throttle, yaw input 0.1. |
 | Random Spin Slow, Medium, Fast (22 to 24) | On starting, zero throttle and each turning input 0.1 plus a random number times 0.3, 0.5 or 0.9. Its update does nothing. |
 | Match Speed (32) | Sets the throttle to the target's speed over the ship's cruise speed. Pops when the target is no longer valid. |
@@ -243,6 +266,48 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | Eject Player (118) | The player's ship drifts, unpowered, for 400 to 599 ticks, then explodes, unless the pilot ejects first ([Destruction](objects.md#destruction), [Ejection](ejection.md#ejecting)). |
 
 **Unknown:** what the other orders do.
+
+### Following a path
+
+Ship Follow Curve (17) and Ship Follow Curve Backwards (119) fly a ship along a path of the mission's
+curves ([The director's camera](director.md#curves)): from the curve its data names, on through the
+curve that carries the path on from each curve's end, over the seconds its data gives. The data holds
+the curve (`+0x0A`), the seconds (`+0x0E`) and the ship that carries the path (`+0x12`), whose offset
+from where the mission placed it, as the order starts, moves the whole path (`curve_ride`). Their
+state:
+
+| Offset | What it holds |
+|---|---|
+| `+0x00` | The routine `motion_follow` gets its point from: `0x00403200`, or `0x00403600` backwards |
+| `+0x04` | The fastest the ship moves, as a share of its top speed: 1 |
+| `+0x08` | The curve it flies now |
+| `+0x0C` | The step |
+| `+0x10` | The frame's tick the curve began |
+| `+0x14` | The curve's share of the order's seconds, in ticks, as its length is to the path's |
+| `+0x18` | The path's length |
+| `+0x28` | Where the carrying ship stood as the order started |
+| `+0x34` | The share of the way along the curve to the next place a point marks, 0 for none |
+
+| Step | What it does |
+|---|---|
+| 0 | It arrives (`ai_arrive`) at the path's start, turned toward the path's point 4 ticks on and at the throttle the path keeps between them over its cruise speed; the curve's clock holds at its start. The order backwards arrives at the path's end instead, turned toward its point 4 ticks back, its motion `motion_forward` |
+| 1 | In a multiplayer game it waits for the other players; in a game of one, it goes on |
+| 2 | It flies `motion_follow` along the path, or `motion_follow_backwards` where its motion was astern; backwards, `motion_follow`. The path moves it on to step 3 |
+| 3 | The order pops, and its `exit` gives the ship `motion_forward`, or `motion_backward` after `motion_follow_backwards` |
+
+The path's routine, each update of the motion, gives the curve's point as far along as its ticks
+have gone (`curve_point`), carried with the carrying ship. Forward, past a place a point marks, the
+point has ShipReached, with the ship (`event_post_ship_reached`, `0x0045AC10`), one place an update.
+At the curve's end the ship it ends at has ShipReached too, and the next curve begins; with none, the
+step moves on. Backwards, past the curve's start, the curve before it begins, found by walking the
+path again from the order's curve, or at that curve the step moves on.
+
+**Fix:** the game divides by nothing for a path of no length and for a curve given no ticks,
+follows a path that comes round on itself for ever as it walks it, and carries a path on from a
+curve that ends at no ship to one that starts or ends at none; OpenReliant gives such a curve all
+the order's ticks, takes it to its end, stops walking after as many curves as the mission has, and
+ends the path there. It holds a curve's ticks at 65535, where the game takes them round from
+nothing.
 
 ### Picking a fight
 

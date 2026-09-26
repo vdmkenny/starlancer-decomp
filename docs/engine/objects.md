@@ -462,12 +462,13 @@ rounded to the nearest step.
 
 ### The orders' motion functions
 
-The orders select eight more motion functions, which read the order's state (`0x68C`). OpenReliant
-has the two the [ejection](ejection.md) selects, `motion_brake` (`0x00474610`) and `motion_drift`
-(`0x00474B00`), the two the [launches](launch.md) select, `motion_downward` (`0x004744E0`) and
-`motion_plain` (`0x00474570`), and the two of the [jumps](jump.md#the-motions), `motion_jump_out`
-(`0x00474640`) and `motion_jump_in` (`0x004746D0`); the rest aren't ported yet
-([#30](https://github.com/vdmkenny/openreliant/issues/30)).
+The orders select eight more motion functions, which read the order's state (`0x68C`): the two the
+[ejection](ejection.md) selects, `motion_brake` (`0x00474610`) and `motion_drift` (`0x00474B00`),
+the two the [launches](launch.md) select, `motion_downward` (`0x004744E0`) and `motion_plain`
+(`0x00474570`), the two of the [jumps](jump.md#the-motions), `motion_jump_out` (`0x00474640`) and
+`motion_jump_in` (`0x004746D0`), and the two of the [paths ships follow](orders.md#following-a-path),
+`motion_follow` (`0x00474770`) and `motion_follow_backwards` (`0x00474930`). OpenReliant has all
+eight.
 
 | Address | Selected by | What it does |
 |---|---|---|
@@ -476,8 +477,8 @@ has the two the [ejection](ejection.md) selects, `motion_brake` (`0x00474610`) a
 | `0x00474610` | Eject | Slows the velocity to 0.97 of itself each update. |
 | `0x00474640` | Jump Out | Moves the object to the point between the two of the order's state by the square of the share of 250 ticks since it went. No rotation, the last update's throttle nothing. |
 | `0x004746D0` | Jump In | Flies along the nose at 2400 for an object that lists components, or 600, less 0.003 of that for each tick since the jump placed it, but never slower than the cruise speed. No rotation, the last update's throttle nothing. |
-| `0x00474770` | Follow Curve, Dock | Steers toward the point the order's state gives and moves toward it, no faster than the order's speed limit. |
-| `0x00474930` | Follow Curve | The same, flying tail first. |
+| `0x00474770` | Follow Curve, Dock | Turns toward the point the routine at the start of the order's state gives: its inputs are the angles between the ship's orientation and the look at the point (`mat3_angles`), less 6 times each turn rate, times 11.46; turned at the point within 0.01 radians, it rolls to stand as the way up the routine gives, where it gives one. Then `object_steer`, and it moves straight to the point, no faster than its top speed times the share at `+0x04` of the state, its throttle the share of its top speed it moves at. |
+| `0x00474930` | Follow Curve | The same, its turns the other way round, for flying tail first. |
 | `0x00474B00` | The ship a pilot has left (`eject_separate`) | Slows the velocity to 0.99 of itself each update. |
 
 ### Porting
@@ -498,10 +499,9 @@ settles by is one `settle` helper rather than the six copies the binary holds.
 object at the start of each step, after `gameobj.orthonormalizeTurn` on the object whose turn it is
 (`gameobj.nextTurn`). `create.objectsUpdate` then moves them.
 
-Not yet ported: the orders' motion functions
-([#30](https://github.com/vdmkenny/openreliant/issues/30)), and the inertia tensor that
-`object_recentre` inverts into `0x548` ([#87](https://github.com/vdmkenny/openreliant/issues/87)),
-so knocks don't turn objects in OpenReliant yet.
+Not yet ported: the inertia tensor that `object_recentre` inverts into `0x548`
+([#87](https://github.com/vdmkenny/openreliant/issues/87)), so knocks don't turn objects in
+OpenReliant yet.
 
 ## Shields
 

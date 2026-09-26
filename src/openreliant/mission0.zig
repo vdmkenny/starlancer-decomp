@@ -430,7 +430,7 @@ test "the Reliant flies at a crawl" {
     flight.max_speed = cruise;
     var object = game.gameobj.testing.object();
     object.throttle = @as(f32, crawl_speed) / cruise;
-    for (0..200) |_| game.motion.Motion.forward.run(&object, .{ .own = &flight }, .chase, null);
+    for (0..200) |_| game.motion.Motion.forward.run(&object, .{ .own = &flight }, .chase, .{});
     const velocity = game.gameobj.vector(object.velocity);
     try std.testing.expectApproxEqAbs(crawl_speed, @sqrt(@reduce(.Add, velocity * velocity)), 0.01);
 }

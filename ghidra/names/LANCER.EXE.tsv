@@ -1661,3 +1661,10 @@ address	kind	name	type	comment
 00539938	data	camera_shot_hold_index	int	The index of what the first shot holds still
 00539a30	data	camera_held_kind	int	The kind of what the shot on screen holds still
 00539a40	data	camera_held_index	int	The index of what the shot on screen holds still
+00402140	function	ai_arrive	bool __fastcall (GameObject *object, Vec3 *point, float *orientation, float least)	Brings a ship to a point turned as an orientation, at a least throttle, through ai_arrive_steer; whether it is within 2000
+00402160	function	ai_arrive_steer	bool __fastcall (GameObject *object, Vec3 *point, float *orientation, float least)	ai_arrive's work: straight at the point from behind it on its line, else round the circle that meets the line at it, slowing as it nears
+004031a0	function	follow_curve_begin	void __fastcall (int slot, Curve *curve)	Begins a curve of a Follow Curve path: now, for its share of the order's seconds, and the first place a point marks on it
+00403200	function	follow_curve_way	void __fastcall (int slot, Vec3 *point, Vec3 *up)	Ship Follow Curve's path for motion_follow: the curve's point as far as its ticks have gone, ShipReached at marked places and the curve's end, then the next curve
+00403580	function	follow_back_curve	void __fastcall (int slot, Curve *before)	Begins the curve before one on a Follow Curve path backwards, or the path's last for none
+00403600	function	follow_back_way	void __fastcall (int slot, Vec3 *point, Vec3 *up)	Ship Follow Curve Backwards' path for motion_follow: the curve's point as far back from its end as its ticks have gone, then the curve before
+00458600	function	follow_curve_give	uint __fastcall (MissionShip *ship, uint *args, MissionShip *offset)	Gives a ship Ship Follow Curve with the command's curve, seconds and carrying ship as its data

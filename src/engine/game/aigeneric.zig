@@ -13,6 +13,7 @@ const aieject = @import("aieject.zig");
 const aiexplode = @import("aiexplode.zig");
 const aifight = @import("aifight.zig");
 const aiorders = @import("aiorders.zig");
+const follow = @import("ai/follow.zig");
 const camera = @import("camera.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
@@ -20,6 +21,7 @@ const guns = @import("guns.zig");
 const input = @import("../input.zig");
 const jump = @import("jump.zig");
 const launch = @import("launch.zig");
+const motion = @import("motion.zig");
 const Clock = @import("main.zig").Clock;
 const orders = @import("ai/orders.zig");
 const Order = orders.Order;
@@ -129,6 +131,8 @@ pub const Entry = extern struct {
         destroyed: aiexplode.Data,
         disrupted: aiorders.DisruptedData,
         launch: launch.Data,
+        /// Ship Follow Curve's and Ship Follow Curve Backwards'.
+        follow: follow.Data,
     };
 
     comptime {
@@ -171,6 +175,9 @@ pub const State = extern union {
     disrupted: aiorders.DisruptedState,
     launch: launch.State,
     jump: jump.State,
+    follow: follow.State,
+    /// What every order that flies a ship by `motion_follow` holds first.
+    follower: motion.Follower,
 
     comptime {
         assert(@sizeOf(State) == 0x90);
@@ -490,6 +497,8 @@ fn runInit(ctx: Context, index: u16, info: orders.Info) void {
         .launch => launch.init(ctx, index),
         .jump_in, .jump_in_40 => jump.inInit(ctx, index),
         .jump_out, .jump_out_41 => jump.outInit(ctx, index),
+        .ship_follow_curve => follow.init(ctx, index),
+        .ship_follow_curve_backwards => follow.backwardsInit(ctx, index),
         else => {},
     }
 }
@@ -525,6 +534,8 @@ fn runUpdate(ctx: Context, index: u16, info: orders.Info) void {
         .launch => launch.update(ctx, index),
         .jump_in, .jump_in_40 => jump.inUpdate(ctx, index),
         .jump_out, .jump_out_41 => jump.outUpdate(ctx, index),
+        .ship_follow_curve => follow.update(ctx, index),
+        .ship_follow_curve_backwards => follow.backwardsUpdate(ctx, index),
         else => {},
     }
 }
@@ -534,6 +545,8 @@ fn runExit(ctx: Context, index: u16, info: orders.Info) void {
     switch (info.order) {
         .scoop_up => tractor.scoopUpExit(ctx, index),
         .disrupted => aiorders.disruptedExit(ctx, index),
+        .ship_follow_curve => follow.exit(ctx, index),
+        .ship_follow_curve_backwards => follow.backwardsExit(ctx, index),
         else => {},
     }
 }

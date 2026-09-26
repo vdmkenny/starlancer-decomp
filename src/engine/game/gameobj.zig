@@ -2015,7 +2015,7 @@ test "a knock pushes and turns an object" {
     // A push to the side on the nose: the object moves off to that side and turns its nose there.
     knock(&object, .{ 0.02, 0, 0 }, .{ 0, 0, 1 });
     try std.testing.expectEqual(1, object.knocks);
-    motion.move(&object, .{ .own = &testing.flight }, .chase, .forward, null, null);
+    motion.move(&object, .{ .own = &testing.flight }, .chase, .forward, null, .{});
     try std.testing.expectEqual(0, object.knocks);
     // The knock replaces the motion routine, so the throttle adds nothing this update.
     try std.testing.expectEqual(math.Vector{ 0.005, 0, 0 }, vector(object.velocity));

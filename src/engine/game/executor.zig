@@ -16,6 +16,7 @@ const aigeneric = @import("aigeneric.zig");
 const camera = @import("camera.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
+const follow = @import("ai/follow.zig");
 const hud = @import("hud.zig");
 const launch = @import("launch.zig");
 const mission = @import("mission.zig");
@@ -90,6 +91,9 @@ const implementations = table: {
         .{ "SetFlybackMarker", setFlybackMarker },
         .{ "ResetFlybackMarker", resetFlybackMarker },
         .{ "MatchSpeed", matchSpeed },
+        .{ "ShipFollowCurve", shipFollowCurve },
+        .{ "MovingShipFollowCurve", movingShipFollowCurve },
+        .{ "MovingShipBackupCurve", movingShipBackupCurve },
         .{ "StartDirectorCam", startDirectorCam },
         .{ "StackDirectorCam", stackDirectorCam },
         .{ "StopDirectorCam", stopDirectorCam },
@@ -832,6 +836,69 @@ fn matchSpeed(call: Call) u32 {
     return 1;
 }
 
+/// `cmd_ShipFollowCurve` (`0x004585D0`, command `0x12`): each ship the first argument names follows
+/// the path from the curve the second names, over the seconds the third gives (`followCurve`).
+fn shipFollowCurve(call: Call) u32 {
+    vm.Machine.forEachShip(call, shipFollowCurveShip);
+    return 1;
+}
+
+/// `cmd_ShipFollowCurve_ship` (`0x004585F0`).
+fn shipFollowCurveShip(call: Call, ship: u16) void {
+    followCurve(call, ship, .ship_follow_curve, null);
+}
+
+/// `cmd_MovingShipFollowCurve` (`0x004585A0`, command `0x1B`): `ShipFollowCurve`, the path carried
+/// by where the ship the fourth argument names stands, as the order starts, from where the mission
+/// placed it (`follow.Data.offset`).
+fn movingShipFollowCurve(call: Call) u32 {
+    vm.Machine.forEachShip(call, movingShipFollowCurveShip);
+    return 1;
+}
+
+/// `cmd_MovingShipFollowCurve_ship` (`0x004585C0`).
+///
+/// **Fix:** the game takes a null fourth argument for a ship's record at address -1; OpenReliant
+/// carries the path by nothing.
+fn movingShipFollowCurveShip(call: Call, ship: u16) void {
+    followCurve(call, ship, .ship_follow_curve, call.args[2]);
+}
+
+/// `cmd_MovingShipBackupCurve` (`0x00458670`, command `0x4B`): `MovingShipFollowCurve`, the path followed backwards
+/// (Ship Follow Curve Backwards), where the fourth argument may be null.
+fn movingShipBackupCurve(call: Call) u32 {
+    vm.Machine.forEachShip(call, movingShipBackupCurveShip);
+    return 1;
+}
+
+/// `cmd_MovingShipBackupCurve_ship` (`0x00458690`).
+fn movingShipBackupCurveShip(call: Call, ship: u16) void {
+    followCurve(call, ship, .ship_follow_curve_backwards, call.args[2]);
+}
+
+/// `0x00458600`, and `0x00458690`'s like work: the mission's ship `ship` takes `order`, aimed at
+/// nothing, with its data from the command's arguments after the first: the curve its path starts
+/// along, the path's seconds, and the ship the path is carried by, `offset`, where there is one.
+///
+/// **Fix:** the game writes the data into whatever order the ship has on top where it refuses the
+/// order; OpenReliant writes none.
+fn followCurve(call: Call, ship: u16, order: Order, offset: ?u32) void {
+    const machine = call.machine;
+    const game = machine.game orelse return;
+    if (ship >= game.world.objects.slots.len) return;
+    const pushed = aigeneric.push(game, ship, order, .none) catch |err| {
+        log.warn("mission ship {d} follows no curve: {s}", .{ ship, @errorName(err) });
+        return;
+    };
+    if (!pushed) return;
+    const offset_ship = if (offset) |place| machine.shipIndex(place) else null;
+    game.world.objects.slots[ship].orders[0].data = .{ .follow = .{
+        .curve = if (machine.curveIndex(call.args[0])) |curve| curve else follow.Data.none,
+        .seconds = call.args[1],
+        .offset = if (offset_ship) |index| index else follow.Data.none,
+    } };
+}
+
 /// `cmd_StartDirectorCam` (`0x004582E0`, command `0x10`): the director's shots waiting are
 /// dropped, and the camera takes this one at once (`stackDirectorCam`).
 fn startDirectorCam(call: Call) u32 {
@@ -1348,6 +1415,59 @@ test shipType {
     try std.testing.expectEqual(gameobj.Type.grendel, shipType(all, &bound, ships[1]));
     all.mission_number = create.kamov_mission;
     try std.testing.expectEqual(gameobj.Type.kamov, shipType(all, &bound, ships[0]));
+}
+
+test "the follow commands give their orders along the curves" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    try routine.op(.push_flight_group, &.{0});
+    try routine.command("CreateFlightGroup");
+    // The first Sabre along curve 0 for 150 seconds; the second backwards along it, carried by
+    // where the first stands.
+    try routine.op(.push_ship, &.{1});
+    try routine.op(.push_curve, &.{0});
+    try routine.pushConstant(150);
+    try routine.command("ShipFollowCurve");
+    try routine.op(.push_ship, &.{2});
+    try routine.op(.push_curve, &.{0});
+    try routine.op(.push_byte, &.{20});
+    try routine.op(.push_ship, &.{1});
+    try routine.command("MovingShipBackupCurve");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    const point = dte.Ship.curve_point_kind;
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, 0, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(2, 0, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(3, dte.Ship.no_flight_group, point, dte.Ship.no_pilot),
+            testShip(4, dte.Ship.no_flight_group, point, dte.Ship.no_pilot),
+        },
+        .flight_groups = &.{testGroup(5, dte.FlightGroup.no_wing)},
+        .curves = &.{curves.testCurve(3, 4, .{ 0, 0, 0 }, .{ 0, 0, 1000 })},
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    game.world.mission = &fixture.mission;
+    fixture.machine.game = game;
+    try fixture.machine.start();
+
+    const all = world.objects;
+    try std.testing.expectEqual(Order.ship_follow_curve, all.slots[1].orders[0].order);
+    try std.testing.expectEqual(follow.Data{ .curve = 0, .seconds = 150, .offset = follow.Data.none }, all.slots[1].orders[0].data.follow);
+    try std.testing.expectEqual(Order.ship_follow_curve_backwards, all.slots[2].orders[0].order);
+    try std.testing.expectEqual(follow.Data{ .curve = 0, .seconds = 20, .offset = 1 }, all.slots[2].orders[0].data.follow);
 }
 
 test "the director's commands stack shots, wait for them and stop them" {

@@ -12,14 +12,14 @@ const camera = @import("camera.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const jump = @import("jump.zig");
+const follow = @import("ai/follow.zig");
 const objects = @import("objects.zig");
 const Clock = @import("main.zig").Clock;
 const GameObject = gameobj.GameObject;
 
 /// The routine `GameObject.motion` points at, which moves it for one update. `create_object` gives
-/// every object `motion_forward`. The orders select eight more, of which OpenReliant has those of
-/// the pilot's ejection, of the launches and of the jumps; the rest aren't ported yet (#30), and
-/// docs/engine/objects.md lists them.
+/// every object `motion_forward`. The orders select eight more: those of the pilot's ejection, of
+/// the launches, of the jumps and of the paths ships follow, which docs/engine/objects.md lists.
 pub const Motion = enum {
     /// `motion_forward` (`0x004744C0`): the flight model thrusting ahead.
     forward,
@@ -49,10 +49,20 @@ pub const Motion = enum {
     /// `jump_in_slowing` of that for each tick since the jump began, and at its cruise speed at
     /// least; turning nothing, its last throttle nothing.
     jump_in,
+    /// `motion_follow` (`0x00474770`), which Follow Curve and Dock give a ship: it turns toward the
+    /// point its order's path gives (`Following`), and moves straight to it, no faster than its top
+    /// speed times its order's limit (`Follower.limit`), its throttle the share of its top speed it
+    /// moves at. Turned toward the point within `aligned`, it rolls to stand as the way up the
+    /// path gives, where it gives one.
+    follow,
+    /// `motion_follow_backwards` (`0x00474930`): `follow`, its turns the other way round, for a
+    /// ship flying tail first.
+    follow_backwards,
 
     /// Moves `object` for one update, by `flight` in `view` where it flies; a jump by its order's
-    /// state and the clock (`jumping`).
-    pub fn run(motion: Motion, object: *GameObject, flight: Flight, view: camera.View, jumping: ?Jumping) void {
+    /// state and the clock, and a path by the order's own (`By`).
+    pub fn run(motion: Motion, object: *GameObject, flight: Flight, view: camera.View, by: By) void {
+        const jumping = by.jumping;
         switch (motion) {
             .forward => fly(object, flight.own, view, ahead),
             .backward => fly(object, flight.own, view, astern),
@@ -84,8 +94,18 @@ pub const Motion = enum {
                 object.rotation = math.identity;
                 object.last_throttle = 0;
             },
+            .follow, .follow_backwards => |way| if (by.following) |on| {
+                followPath(object, flight.own, on.way(), on.limit(), way == .follow_backwards);
+            },
         }
     }
+};
+
+/// What an order's motion goes by besides the object, which the game's motions read from the
+/// order's state and from globals.
+pub const By = struct {
+    jumping: ?Jumping = null,
+    following: ?Following = null,
 };
 
 /// What the jumps' motions go by besides the object: its jump's state (`GameObject.order_state`)
@@ -94,6 +114,84 @@ pub const Jumping = struct {
     state: *const jump.State,
     clock: *const Clock,
 };
+
+/// What `motion_follow` goes by besides the object: the world its order's path is worked out in,
+/// and the slot the object is in.
+pub const Following = struct {
+    world: gameobj.World,
+    index: u16,
+
+    /// Where the order's path has the ship go this update, which moves the path on: the routine its
+    /// state names (`Follower.path`), which the game calls through the state's first word.
+    fn way(following: Following) Way {
+        const slot = &following.world.objects.slots[following.index];
+        return switch (slot.state.follower.path) {
+            .curve => follow.curveWay(following.world, following.index),
+            .curve_backwards => follow.backwardsWay(following.world, following.index),
+            _ => .{ .point = gameobj.vector(slot.object.root.position) },
+        };
+    }
+
+    fn limit(following: Following) f32 {
+        return following.world.objects.slots[following.index].state.follower.limit;
+    }
+};
+
+/// What an order that flies a ship by `motion_follow` holds at the start of its state
+/// (`GameObject.order_state`): the path the motion follows (`+0x00`), where the game holds the
+/// routine that gives the path's point, and the fastest the ship moves, as a share of its top
+/// speed (`+0x04`).
+pub const Follower = extern struct {
+    path: Path,
+    limit: f32,
+
+    pub const Path = enum(u32) {
+        /// Ship Follow Curve's (`follow_curve_way`, `0x00403200`).
+        curve = 1,
+        /// Ship Follow Curve Backwards' (`follow_back_way`, `0x00403600`).
+        curve_backwards = 2,
+        _,
+    };
+};
+
+/// Where a path has a ship go: its point, and the way up it has the ship stand, nothing for none.
+pub const Way = struct {
+    point: math.Vector,
+    up: math.Vector = @splat(0),
+};
+
+/// How near the point the motion's turn must bring the ship, in radians each way, before it rolls
+/// to stand as the path's way up (`0x004DC518`).
+const aligned: f32 = 0.01;
+
+/// `motion_follow`'s work for `object`, flown by `flight`, toward `way`, no faster than `limit` of
+/// its top speed: its turning inputs from the angles between its orientation and the look at the
+/// point, damped by its turn rates (`ai.rate_damping`), turned about for `backwards`; the steering
+/// (`steer`); then its velocity straight to the point, held to `limit` of its top speed.
+///
+/// **Improvement:** the angles come from `std.math` rather than the engine's table (`sr_atan2`).
+fn followPath(object: *GameObject, flight: *const create.FlightModel, way: Way, limit: f32, backwards: bool) void {
+    const at = gameobj.vector(object.root.position);
+    const look = math.lookAt(way.point - at);
+    var turn = math.angles(math.product(math.transpose(object.root.orientation), look));
+    if (@reduce(.Or, way.up != @as(math.Vector, @splat(0))) and @abs(turn[0]) < aligned and @abs(turn[1]) < aligned) {
+        const up = math.transformTransposed(object.root.orientation, way.up);
+        turn[2] = -std.math.atan2(up[0], up[1]);
+    }
+    if (backwards) turn = -turn;
+    object.pitch_input = (turn[0] - ai.rate_damping * object.pitch_rate) * ai.input_per_radian;
+    object.yaw_input = (turn[1] - ai.rate_damping * object.yaw_rate) * ai.input_per_radian;
+    object.roll_input = (turn[2] - ai.rate_damping * object.roll_rate) * ai.input_per_radian;
+    steer(object, flight, false);
+    var velocity = way.point - at;
+    object.throttle = math.length(velocity) / flight.max_speed;
+    if (object.throttle > limit) {
+        velocity = math.normalize(velocity) * @as(math.Vector, @splat(flight.max_speed * limit));
+        object.throttle = limit;
+    }
+    object.velocity = gameobj.vec3(velocity);
+    object.last_throttle = object.throttle;
+}
 
 /// How far through its going Jump Out's motion is for each of the mission's ticks, the share of
 /// `jump.going_ticks` a tick (`0x004DC7B0`).
@@ -250,13 +348,13 @@ fn plain(object: *GameObject, flight: *const create.FlightModel, axis: math.Axis
 /// faster than its cruise speed, as it does under afterburner, the move raises the shake to at
 /// least `0.2 * (speed / cruise speed - 1)`. The game also stores the change in the player's
 /// speed at `player_speed_change` (`0x00562CE4`), which nothing reads.
-pub fn move(object: *GameObject, flight: Flight, view: camera.View, motion: ?Motion, player_shake: ?*f32, jumping: ?Jumping) void {
+pub fn move(object: *GameObject, flight: Flight, view: camera.View, motion: ?Motion, player_shake: ?*f32, by: By) void {
     if (object.flags.frozen) return;
     object.root.flags.next_pending = true;
     const knocked = object.knocks > 0;
     if (object.flags.jumping and !knocked and !object.flags.unpowered) return;
     if (!knocked and !object.flags.unpowered) {
-        if (motion) |routine| routine.run(object, flight, view, jumping);
+        if (motion) |routine| routine.run(object, flight, view, by);
     } else {
         gameobj.applyKnocks(object);
     }
@@ -290,8 +388,11 @@ pub fn moveSlot(world: gameobj.World, index: u16) void {
         .own = own,
         .fighter = if (fighter) if (world.spawn) |spawn| &spawn.tables.flight[fighters_flight_type] else null else null,
     };
-    const jumping: Jumping = .{ .state = &slot.state.jump, .clock = world.clock };
-    move(&slot.object, flight, world.view, slot.motion, if (index == all.player) world.shake else null, jumping);
+    const by: By = .{
+        .jumping = .{ .state = &slot.state.jump, .clock = world.clock },
+        .following = .{ .world = world, .index = index },
+    };
+    move(&slot.object, flight, world.view, slot.motion, if (index == all.player) world.shake else null, by);
 }
 
 test steer {
@@ -346,7 +447,7 @@ test "the throttle settles between 0 and 1, and the burns take it past both ends
 test "a ship settles at its cruise speed along its nose" {
     var object = gameobj.testing.object();
     object.throttle = 1;
-    for (0..400) |_| move(&object, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    for (0..400) |_| move(&object, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     // The model frame has Z forward, so all of the speed is along the nose.
     try std.testing.expectApproxEqAbs(320, object.speed, 0.5);
     try std.testing.expectApproxEqAbs(320, object.velocity.z, 0.5);
@@ -357,20 +458,20 @@ test "a ship settles at its cruise speed along its nose" {
 
     // Half its engines gone, it settles at half the speed.
     object.engines_intact = 0.5;
-    for (0..400) |_| move(&object, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    for (0..400) |_| move(&object, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     try std.testing.expectApproxEqAbs(160, object.speed, 0.5);
 
     // Backward, the same ship ends up going the other way at the same speed.
     var reversed = gameobj.testing.object();
     reversed.throttle = 1;
-    for (0..400) |_| move(&reversed, .{ .own = &gameobj.testing.flight }, .chase, .backward, null, null);
+    for (0..400) |_| move(&reversed, .{ .own = &gameobj.testing.flight }, .chase, .backward, null, .{});
     try std.testing.expectApproxEqAbs(-320, reversed.velocity.z, 0.5);
 }
 
 test "the lateral input pushes a ship a quarter as fast sideways" {
     var object = gameobj.testing.object();
     object.lateral_input = 1;
-    for (0..400) |_| move(&object, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    for (0..400) |_| move(&object, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     try std.testing.expectApproxEqAbs(320 * lateral_share, object.velocity.x, 0.5);
 }
 
@@ -382,7 +483,7 @@ test move {
     // move uses it; a turn of nothing stands in for that here.
     object.rotation = math.identity;
     // With no motion routine, it carries on at the velocity it has.
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, .{});
     try std.testing.expectEqual(11, object.root.next_position.x);
     try std.testing.expectEqual(2, object.root.next_position.y);
     try std.testing.expectEqual(23, object.root.next_position.z);
@@ -397,8 +498,8 @@ test "a braking object slows faster than a drifting one, and lets go of its thro
     braking.velocity = .{ .x = 0, .y = 0, .z = 100 };
     braking.last_throttle = 1;
     var drifting = braking;
-    Motion.brake.run(&braking, .{ .own = &gameobj.testing.flight }, .chase, null);
-    Motion.drift.run(&drifting, .{ .own = &gameobj.testing.flight }, .chase, null);
+    Motion.brake.run(&braking, .{ .own = &gameobj.testing.flight }, .chase, .{});
+    Motion.drift.run(&drifting, .{ .own = &gameobj.testing.flight }, .chase, .{});
     try std.testing.expectApproxEqAbs(100 * brake_share, braking.velocity.z, 1e-4);
     try std.testing.expectEqual(0, braking.last_throttle);
     try std.testing.expectApproxEqAbs(100 * drift_share, drifting.velocity.z, 1e-4);
@@ -415,29 +516,29 @@ test "the plain motions push along the ship's own axes, a fighter by the first t
     dropping.root.next_orientation = turned;
     dropping.throttle = 1;
     dropping.last_throttle = 1;
-    for (0..400) |_| Motion.downward.run(&dropping, flight, .chase, null);
+    for (0..400) |_| Motion.downward.run(&dropping, flight, .chase, .{});
     try std.testing.expectApproxEqAbs(-100, dropping.velocity.x, 0.5);
     try std.testing.expectApproxEqAbs(0, dropping.velocity.y, 1e-3);
     try std.testing.expectEqual(0, dropping.last_throttle);
     // With no throttle, it turns no more slowly.
     dropping.throttle = 0;
     dropping.pitch_input = 1;
-    Motion.downward.run(&dropping, flight, .chase, null);
+    Motion.downward.run(&dropping, flight, .chase, .{});
     try std.testing.expectApproxEqAbs(0.4, dropping.pitch_rate, 1e-6);
 
     // Plain, along the nose, keeping its throttle as the last.
     var boosting = gameobj.testing.object();
     boosting.throttle = 2;
-    for (0..400) |_| Motion.plain.run(&boosting, flight, .chase, null);
+    for (0..400) |_| Motion.plain.run(&boosting, flight, .chase, .{});
     try std.testing.expectApproxEqAbs(200, boosting.velocity.z, 0.5);
     try std.testing.expectEqual(2, boosting.last_throttle);
     // The Ripper flies by its own flight model, and so does what is no fighter.
     boosting.type = .ripper;
-    for (0..400) |_| Motion.plain.run(&boosting, flight, .chase, null);
+    for (0..400) |_| Motion.plain.run(&boosting, flight, .chase, .{});
     try std.testing.expectApproxEqAbs(640, boosting.velocity.z, 0.5);
     var other = gameobj.testing.object();
     other.throttle = 1;
-    for (0..400) |_| Motion.downward.run(&other, .{ .own = &gameobj.testing.flight }, .chase, null);
+    for (0..400) |_| Motion.downward.run(&other, .{ .own = &gameobj.testing.flight }, .chase, .{});
     try std.testing.expectApproxEqAbs(320, other.velocity.y, 0.5);
 }
 
@@ -470,7 +571,7 @@ test "an object travels from step to step" {
     // Each step commits the place the previous one worked out, then moves on from it.
     for (0..3) |_| {
         gameobj.updateTree(&object.root, null, null);
-        move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, null);
+        move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, .{});
     }
     try std.testing.expectEqual(30, object.root.next_position.z);
     // Between steps the committed position is one step behind.
@@ -483,7 +584,7 @@ test "frozen, unpowered and jumping objects" {
     frozen.velocity = .{ .x = 0, .y = 0, .z = 10 };
     frozen.rotation = math.identity;
     frozen.flags.frozen = true;
-    move(&frozen, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    move(&frozen, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     try std.testing.expect(!frozen.root.flags.next_pending);
     try std.testing.expectEqual(0, frozen.root.next_position.z);
 
@@ -494,7 +595,7 @@ test "frozen, unpowered and jumping objects" {
     unpowered.rotation = math.identity;
     unpowered.throttle = 1;
     unpowered.flags.unpowered = true;
-    move(&unpowered, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    move(&unpowered, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     try std.testing.expectEqual(10, unpowered.velocity.z);
     try std.testing.expectEqual(10, unpowered.root.next_position.z);
 
@@ -504,12 +605,36 @@ test "frozen, unpowered and jumping objects" {
     jumping.rotation = math.identity;
     jumping.mass = 1;
     jumping.flags.jumping = true;
-    move(&jumping, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    move(&jumping, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     try std.testing.expect(jumping.root.flags.next_pending);
     try std.testing.expectEqual(0, jumping.root.next_position.z);
     gameobj.knock(&jumping, .{ 0, 0, 5 }, .{ 0, 0, 0 });
-    move(&jumping, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, null);
+    move(&jumping, .{ .own = &gameobj.testing.flight }, .chase, .forward, null, .{});
     try std.testing.expectEqual(15, jumping.root.next_position.z);
+}
+
+test "the follow motion flies straight at its path's point, no faster than its limit" {
+    var object = gameobj.testing.object();
+    const flight = &gameobj.testing.flight;
+    // Straight ahead and near, it goes all the way in the step, at that share of its top speed.
+    followPath(&object, flight, .{ .point = .{ 0, 0, 160 } }, 1, false);
+    try std.testing.expectEqual(160, object.velocity.z);
+    try std.testing.expectEqual(0.5, object.throttle);
+    try std.testing.expectEqual(0, object.yaw_input);
+    // Far, it goes at its limit.
+    followPath(&object, flight, .{ .point = .{ 0, 0, 10000 } }, 0.5, false);
+    try std.testing.expectApproxEqAbs(160, object.velocity.z, 1e-3);
+    try std.testing.expectEqual(0.5, object.throttle);
+    try std.testing.expectEqual(0.5, object.last_throttle);
+    // To one side, it turns toward the point; tail first, the other way.
+    followPath(&object, flight, .{ .point = .{ 1000, 0, 1000 } }, 1, false);
+    const toward = object.yaw_input;
+    try std.testing.expect(toward != 0);
+    object.yaw_rate = 0;
+    object.pitch_rate = 0;
+    object.roll_rate = 0;
+    followPath(&object, flight, .{ .point = .{ 1000, 0, 1000 } }, 1, true);
+    try std.testing.expectApproxEqAbs(-toward, object.yaw_input, 1e-4);
 }
 
 test "Jump Out's motion eases a ship off, and Jump In's flies it in, slowing to its cruise speed" {
@@ -523,7 +648,7 @@ test "Jump Out's motion eases a ship off, and Jump In's flies it in, slowing to 
     object.root.position = .{ .x = 0, .y = 0, .z = 1000 };
     object.last_throttle = 1;
     // Halfway through its going, it is a quarter of the way there.
-    Motion.jump_out.run(&object, flight, .chase, on);
+    Motion.jump_out.run(&object, flight, .chase, .{ .jumping = on });
     try std.testing.expectApproxEqAbs(125000 - 1000, object.velocity.z, 1e-2);
     try std.testing.expectEqual(math.identity, object.rotation);
     try std.testing.expectEqual(0, object.last_throttle);
@@ -532,26 +657,26 @@ test "Jump Out's motion eases a ship off, and Jump In's flies it in, slowing to 
     // its cruise speed.
     for ([_]struct { i32, f32 }{ .{ 100, 600 }, .{ 150, 510 }, .{ 300, 320 } }) |at| {
         clock.frame_start = at[0];
-        Motion.jump_in.run(&object, flight, .chase, on);
+        Motion.jump_in.run(&object, flight, .chase, .{ .jumping = on });
         try std.testing.expectApproxEqAbs(at[1], object.velocity.z, 1e-3);
     }
     // One that lists components comes in faster.
     object.flags.components = true;
     clock.frame_start = 150;
-    Motion.jump_in.run(&object, flight, .chase, on);
+    Motion.jump_in.run(&object, flight, .chase, .{ .jumping = on });
     try std.testing.expectApproxEqAbs(2040, object.velocity.z, 1e-2);
 }
 
 test "moving and turning set the network flags" {
     var object = gameobj.testing.object();
     object.rotation = math.identity;
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, .{});
     try std.testing.expect(!object.network.moved and !object.network.turned);
     object.velocity.z = 1;
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, .{});
     try std.testing.expect(object.network.moved and !object.network.turned);
     object.yaw_rate = 0.1;
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, null, .{});
     try std.testing.expect(object.network.turned);
 }
 
@@ -587,14 +712,14 @@ test "flying faster than the cruise speed shakes the player's camera" {
     var shake: f32 = 0;
     // At the cruise speed, it doesn't.
     object.velocity.z = 320;
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, &shake, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, &shake, .{});
     try std.testing.expectEqual(0, shake);
     // At twice the cruise speed, by 0.2.
     object.velocity.z = 640;
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, &shake, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, &shake, .{});
     try std.testing.expectApproxEqAbs(0.2, shake, 1e-6);
     // It never lowers a stronger shake, such as a hit's.
     shake = 1;
-    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, &shake, null);
+    move(&object, .{ .own = &gameobj.testing.flight }, .chase, null, &shake, .{});
     try std.testing.expectEqual(1, shake);
 }

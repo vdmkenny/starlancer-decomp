@@ -64,6 +64,9 @@ A path runs on from the ship a curve ends at through the curve that carries it o
 **Fix:** the game measures a path that comes round on itself for ever; OpenReliant stops once it
 has taken as many curves as the mission has.
 
+Ships follow the same paths by Ship Follow Curve and its backwards twin
+([Following a path](orders.md#following-a-path)).
+
 A point, a ship of kind `0x3E3`, marks a place on a curve where its record names the curve and the
 share of the way along it ([Ships](../formats/dte.md#ships)). `curve_next_marker` (`0x00457510`)
 finds the nearest place past a share, and the last point that marks the share itself.

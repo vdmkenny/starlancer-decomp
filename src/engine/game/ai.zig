@@ -23,6 +23,8 @@ const objects = @import("objects.zig");
 const GameObject = gameobj.GameObject;
 
 pub const orders = @import("ai/orders.zig");
+/// Ship Follow Curve and its backwards twin.
+pub const follow = @import("ai/follow.zig");
 
 /// A record of the order table. `order_groups` points at the records of each hundred order
 /// numbers: order `n` is record `n % 100` of group `n / 100`.
@@ -600,11 +602,11 @@ pub const full_throttle: f32 = 1;
 ///
 /// **Improvement:** the game holds this rounded to 11.459155, one place in the last digit below
 /// the figure OpenReliant computes.
-const input_per_radian: f32 = std.math.deg_per_rad / 5.0;
+pub const input_per_radian: f32 = std.math.deg_per_rad / 5.0;
 
 /// How much of the turn rate the steering takes off its input at no ease, which damps the turn as
 /// the ship comes round (`0x004DC400`).
-const rate_damping: f32 = 6;
+pub const rate_damping: f32 = 6;
 
 /// While a frame takes more than this many ticks, `steer` halves the turns under `half_turn`, so a
 /// slow frame doesn't overshoot (`frame_duration`).
@@ -693,6 +695,90 @@ pub fn turn(slot: *create.Slot, at: Vector, limit_given: f32, ease_given: f32, f
 
     if (!avoided and flags.roll_upright) rollUpright(object, at);
 }
+
+/// `ai_arrive` (`0x00402140`, `0x00402160`): steers the ship in slot `index` to arrive at `at`,
+/// turned as `orientation`, its throttle `least` or more; whether it has arrived, within
+/// `arrive_reach` of it, its throttle then `least` and its turning inputs nothing. It goes by where
+/// the ship stands next (`Node.next_position`).
+///
+/// Where the ship stands behind `at` along the way `orientation` faces, near that line, and faces
+/// that way itself, it flies at `at` (`steer`, keeping clear of what it could hit), rolling to
+/// stand as `orientation` stands. Otherwise it flies round the circle that runs through it and
+/// meets that line at `at`, its radius `2 * speed_per_pitch_rate` at least, aiming half a radian round
+/// ahead of itself, or at `at` in the circle's last half radian; standing ahead of `at`, it goes
+/// round the far side of the smallest circle. Either way it slows as it nears `at`: its throttle is
+/// the way left over `arrive_steps` times its cruise speed through its inertia, less
+/// `arrive_throttle_less`.
+///
+/// **Improvement:** the angles, sines and cosines come from `std.math` rather than the engine's
+/// tables (`sr_atan2`, `sr_sin`, `sr_cos`).
+pub fn arrive(world: gameobj.World, index: u16, at: Vector, orientation: math.Matrix, least: f32) bool {
+    const slot = &world.objects.slots[index];
+    const object = &slot.object;
+    const flight = slot.flight orelse return false;
+    const off = gameobj.vector(object.root.next_position) - at;
+    const reach = math.length(off);
+    if (reach < arrive_reach) {
+        object.throttle = least;
+        object.pitch_input = 0;
+        object.roll_input = 0;
+        object.yaw_input = 0;
+        return true;
+    }
+    const clear: Steering = .{ .avoid_near = true, .avoid_ahead = true };
+    const local = math.transformTransposed(orientation, off);
+    const slowing = arrive_steps * cruiseSpeed(object, flight, world.view) / (1 - flight.inertia);
+    if (-local[2] > reach * ahead_cosine and
+        math.transformTransposed(orientation, math.forward(object.root.next_orientation))[2] > facing_cosine)
+    {
+        _ = steer(world, index, at, full_limit, no_ease, clear);
+        const up = math.transformTransposed(orientation, math.yAxis(slot.drawn.orientation));
+        const roll = math.halfTurn(std.math.atan2(up[0], up[1]));
+        object.roll_input = (roll - arrive_roll_damping * object.roll_rate) * arrive_roll_input;
+        object.throttle = @max(reach / slowing - arrive_throttle_less, least);
+        return false;
+    }
+    const smallest = 2 * flight.speed_per_pitch_rate;
+    const side = math.normalize(.{ local[0], local[1], 0 });
+    const across = math.dot(local, side);
+    var radius = @abs((across * across + local[2] * local[2]) / (2 * across));
+    const round = std.math.atan2(local[2], radius - across);
+    var aim = if (round > -circle_lead and round < 0) 0 else round + circle_lead;
+    if (local[2] > 0) {
+        radius = smallest;
+        aim = std.math.pi;
+    } else if (radius < smallest) {
+        radius = smallest;
+    }
+    const toward = side * @as(Vector, @splat(radius - radius * @cos(aim))) + Vector{ 0, 0, radius * @sin(aim) };
+    _ = steer(world, index, math.transform(orientation, toward) + at, full_limit, no_ease, clear);
+    const gone = if (round < 0) round + std.math.tau else round;
+    object.throttle = @max((std.math.tau - gone) * radius / slowing - arrive_throttle_less, least);
+    return false;
+}
+
+/// How near `arrive` counts as there (`0x004DC438`).
+pub const arrive_reach: f32 = 2000;
+
+/// How near the way the point faces the ship must face for `arrive` to fly straight at the point,
+/// standing near its line (`ahead_cosine`): the cosine of the angle (`0x004DC434`).
+const facing_cosine: f32 = 0.98;
+
+/// How far round its circle ahead of itself `arrive` aims, in radians, and within how much of the
+/// circle's end it aims at the point itself (`0x004DC408`, `0x004DC41C`).
+const circle_lead: f32 = 0.5;
+
+/// How `arrive` rolls to stand as the point's orientation stands: the roll's damping, and the turn
+/// that fills the input, the angle in degrees over forty (`0x004DC42C`, `0x004DC428`).
+///
+/// **Improvement:** the game holds the second rounded to 1.4323944.
+const arrive_roll_damping: f32 = 12;
+const arrive_roll_input: f32 = std.math.deg_per_rad / 40.0;
+
+/// How `arrive` slows the ship as it nears the point: over this many steps of its cruise speed,
+/// through its inertia, and by this much less throttle (`0x004DC424`, `0x004DC420`).
+const arrive_steps: f32 = 4;
+const arrive_throttle_less: f32 = 0.1;
 
 /// How long ahead, in steps, `avoidNear` looks for a meeting (`0x004DC448`).
 const near_steps: f32 = 250;
@@ -926,6 +1012,43 @@ test playerControlEntry {
     try std.testing.expectEqual(&mission.slot(player).orders[1], entry);
 }
 
+test arrive {
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(std.testing.allocator);
+    defer mission.deinit();
+    const index = try mission.add(.predator, @splat(0));
+    const slot = mission.slot(index);
+    const world = mission.world();
+    const place = struct {
+        fn at(ship: *create.Slot, where: Vector) void {
+            ship.object.root.next_position = gameobj.vec3(where);
+            ship.object.root.next_orientation = math.identity;
+            ship.drawn.position = where;
+            ship.drawn.orientation = math.identity;
+        }
+    }.at;
+    // Within reach it is there: its turns stop, its throttle the least it was given.
+    place(slot, .{ 0, 0, -1000 });
+    try std.testing.expect(arrive(world, index, @splat(0), math.identity, 0.3));
+    try std.testing.expectEqual(0.3, slot.object.throttle);
+    try std.testing.expectEqual(0, slot.object.yaw_input);
+    // Behind the point on its line, facing its way, it flies straight at it, slowing as it nears.
+    place(slot, .{ 0, 0, -20000 });
+    try std.testing.expect(!arrive(world, index, @splat(0), math.identity, 0));
+    try std.testing.expectEqual(0, slot.object.yaw_input);
+    const far = slot.object.throttle;
+    place(slot, .{ 0, 0, -5000 });
+    _ = arrive(world, index, @splat(0), math.identity, 0);
+    try std.testing.expect(slot.object.throttle < far);
+    // Never slower than the least it was given.
+    _ = arrive(world, index, @splat(0), math.identity, 0.9);
+    try std.testing.expectEqual(0.9, slot.object.throttle);
+    // Off to the side, it comes round onto the line, banking first toward the circle's point.
+    place(slot, .{ 20000, 0, -20000 });
+    _ = arrive(world, index, @splat(0), math.identity, 0);
+    try std.testing.expect(slot.object.roll_input != 0);
+}
+
 test steer {
     var mission: gameobj.testing.Mission = undefined;
     try mission.init(std.testing.allocator);
@@ -983,7 +1106,7 @@ test "a ship steered at a point comes round to face it" {
     const before = off(slot, at);
     for (0..50) |_| {
         turn(slot, at, 1, 0, .{ .roll_upright = true }, 1, false);
-        motion.move(&slot.object, .{ .own = slot.flight.? }, .chase, .forward, null, null);
+        motion.move(&slot.object, .{ .own = slot.flight.? }, .chase, .forward, null, .{});
         // What the next step commits, which the steering then reads.
         slot.object.root.position = slot.object.root.next_position;
         slot.object.root.orientation = slot.object.root.next_orientation;

@@ -5,6 +5,7 @@ const std = @import("std");
 
 pub const ai = @import("game/ai.zig");
 pub const aidefend = @import("game/aidefend.zig");
+pub const aidock = @import("game/aidock.zig");
 pub const aieject = @import("game/aieject.zig");
 pub const aiexplode = @import("game/aiexplode.zig");
 pub const aifight = @import("game/aifight.zig");

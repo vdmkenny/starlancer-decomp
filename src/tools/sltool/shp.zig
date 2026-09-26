@@ -193,6 +193,7 @@ fn info(ctx: Context, model: shp.Model) !void {
                     .pod => "pod",
                     .eject_point => "eject point",
                     .case_ejector => "case ejector",
+                    .dock_point => "dock point",
                     .launch_point => "launch point",
                     _ => "kind",
                 },

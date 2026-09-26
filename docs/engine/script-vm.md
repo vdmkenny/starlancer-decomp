@@ -170,6 +170,7 @@ Some of the commands mission 1 runs:
 | `IsShipThisPlayer` (`0x45`) | 1 where the argument names the player's ship, 2 otherwise |
 | `SetFlybackMarker` (`0x46`), `ResetFlybackMarker` (`0x47`) | Set the flyback markers afresh on each ship the first argument names, the second their reach, or drop them ([Display](hud.md#the-flyback-markers)) |
 | `MatchSpeed` (`0x4A`) | Where the first argument names the player's ship, MATCH SPEED turns on, matching at once where it already was, while the second is set, and off otherwise |
+| `Dock` (`0x26`) | The ship the first argument names docks at the port the third gives of the ship the second names, or at the first free port of a flight group's or a squad's ships ([Docking](orders.md#docking)) |
 | `ShipFollowCurve` (`0x12`), `MovingShipFollowCurve` (`0x1B`), `MovingShipBackupCurve` (`0x4B`) | Each ship the first argument names flies the path from the curve the second names, over the seconds the third gives, forward or backwards, the path carried by where the fourth's ship stands from where the mission placed it ([Following a path](orders.md#following-a-path)) |
 | `StartDirectorCam` (`0x10`), `StackDirectorCam` (`0x52`) | The director's camera takes a shot along the mission's curves or at a ship, at once or after those waiting ([The director's camera](director.md#the-commands)) |
 | `StopDirectorCam` (`0x24`) | The camera goes back to the player's cockpit, forced |
@@ -232,6 +233,7 @@ event that a trigger's thread posts as it runs at once waits its turn in the sam
 | ExplosionShip | `event_post_explosion` (`0x0045AB50`), with the groups, as the Uber Explode ends ([Effects](effects.md)) | The ship |
 | Cloaked, Decloaked | `object_cloak`, `object_uncloak` ([Cloak](cloak.md)) | None |
 | PlayerReadyToJump, PlayerReadyToWarp | `player_jump` (`0x00412B20`), on the player's ship | None |
+| Docked | Dock, as the ship is in its berth ([Docking](orders.md#docking)) | None |
 | CameraReached | `event_camera_reached` (`0x00451180`), as the director's camera reaches the end of a curve, or a place a point marks on it ([The director's camera](director.md#a-shot)) | None |
 | CloseProximity, Proximity, ShipReached | The watches (below) | The ship close by; for the first two, how far, in the subject's radii |
 | ShipReached | `event_post_ship_reached` (`0x0045AC10`), as a ship following a path reaches the end of a curve, or a place a point marks on it ([Following a path](orders.md#following-a-path)) | The ship that reached it |

@@ -431,6 +431,14 @@ pub fn shipReached(world: gameobj.World, ship: u16, index: u16) void {
     events.post(ship, .{ .condition = .ship_reached, .values = &values });
 }
 
+/// The object in slot `index` has docked (`order_dock`): its ship's Docked, with no values, for its
+/// own triggers.
+pub fn docked(world: gameobj.World, index: u16) void {
+    const events = world.events orelse return;
+    const ship = events.shipOf(index) orelse return;
+    events.post(ship, .{ .condition = .docked });
+}
+
 /// `event_camera_reached` (`0x00451180`): the director's camera has reached mission ship `ship`,
 /// the end of the curve it flew or a point that marks a place on it. The ship's CameraReached, with
 /// no values, for its own triggers.

@@ -458,7 +458,7 @@ pub const Attachment = extern struct {
     light_brightness: f32,
 
     /// Named after the models the engine loads for each kind, or what `node_mount` (`0x00499A10`)
-    /// makes of them. **Unknown:** kind 9.
+    /// makes of them.
     pub const Kind = enum(u32) {
         missile = 0,
         /// Mounted as an object of its own, whose components follow the model's.
@@ -481,6 +481,9 @@ pub const Attachment = extern struct {
         /// them part by part (`launch_attach`, `0x0041B9F0`), as a carrier's torpedo tubes or the
         /// Reliant's hangar hold them.
         launch_point = 8,
+        /// Where a ship docks, turned as it docks there: a ship's own, its first, and a station's
+        /// ports, which Dock counts part by part (`dock_find_points`, `0x00406C80`).
+        dock_point = 9,
         _,
     };
 

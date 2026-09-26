@@ -13,6 +13,7 @@ const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const jump = @import("jump.zig");
 const follow = @import("ai/follow.zig");
+const aidock = @import("aidock.zig");
 const objects = @import("objects.zig");
 const Clock = @import("main.zig").Clock;
 const GameObject = gameobj.GameObject;
@@ -128,6 +129,7 @@ pub const Following = struct {
         return switch (slot.state.follower.path) {
             .curve => follow.curveWay(following.world, following.index),
             .curve_backwards => follow.backwardsWay(following.world, following.index),
+            .dock => aidock.way(following.world, following.index),
             _ => .{ .point = gameobj.vector(slot.object.root.position) },
         };
     }
@@ -150,6 +152,8 @@ pub const Follower = extern struct {
         curve = 1,
         /// Ship Follow Curve Backwards' (`follow_back_way`, `0x00403600`).
         curve_backwards = 2,
+        /// Dock's, as a ship slides into its berth (`dock_way`, `0x00406F20`).
+        dock = 3,
         _,
     };
 };

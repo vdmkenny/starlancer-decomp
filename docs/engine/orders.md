@@ -243,6 +243,7 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | Toggle Cloak (16) | One-shot: cloaks or uncloaks the ship if its model's header allows a cloak, and the ships being launched from it do the same. |
 | Ship Follow Curve (17) | Flies the path of the mission's curves from the curve in its data ([Following a path](#following-a-path)). |
 | Ship Follow Curve Backwards (119) | Flies that path backwards, from its end to its start. |
+| Dock (109) | Docks at a port of its target ([Docking](#docking)). |
 | Slow Rotate (18) | Zero throttle, yaw input 0.1. |
 | Random Spin Slow, Medium, Fast (22 to 24) | On starting, zero throttle and each turning input 0.1 plus a random number times 0.3, 0.5 or 0.9. Its update does nothing. |
 | Match Speed (32) | Sets the throttle to the target's speed over the ship's cruise speed. Pops when the target is no longer valid. |
@@ -308,6 +309,62 @@ curve that ends at no ship to one that starts or ends at none; OpenReliant gives
 the order's ticks, takes it to its end, stops walking after as many curves as the mission has, and
 ends the path there. It holds a curve's ticks at 65535, where the game takes them round from
 nothing.
+
+### Docking
+
+Dock (109) brings a ship into a berth at another's port. Its target names the ship and the port by
+its component: the port is the ship's docking points (SHP attachment kind 9), counted part by part
+over its root's children. Where the target names no port, or names a flight group or a squad, the
+init (`order_dock_init`, `0x00406B80`) takes the first free port of the ships it names, in the order
+it walks them: the first port at which no other object's current order is Dock
+(`0x00406A90`). It then picks a style by what the ship is and what it docks at, from a table of an
+init, an update and an exit each (`0x004E1618`): the limpet car's (2), or at the Czar docked its
+own (3); the limpet pod's (4); at a Nanny, the Nanny's (1); and otherwise the station's (0). The
+data's first byte holds the style.
+
+The station's style finds the docking points (`0x00406C80`): the ship's own, its first, and the
+port, whose part plays its `deploy` track at 4 from its start. A ship or a station without them
+stops the game with "Docking information not defined on %s". The berth (`0x00406E70`) is where the
+ship's origin stands docked: the port, less the ship's own docking point turned by the port's
+orientation, in the frame the station's part is drawn at, and turned as the port is. Its state:
+
+| Offset | What it holds |
+|---|---|
+| `+0x00` | The routine `motion_follow` gets its point from as the ship slides in: `0x00406F20` |
+| `+0x04` | The fastest the ship slides, a share of its top speed: 0.5 |
+| `+0x08` | The step |
+| `+0x0C` | The frame's tick the slide ends at |
+| `+0x10`, `+0x14` | The ship's own docking point's node and place on it |
+| `+0x20`, `+0x24`, `+0x30` | The port's node, its place on it and its orientation |
+| `+0x54` | Whether the ship came from the port's right, which mirrors the way round |
+| `+0x58` | Where the ship stood as it began to slide in |
+
+The init (`0x00407010`) picks the first step by where the ship stands in the port's frame: more
+than 100000 behind the port, step 3 where it stands within a fifth of that to the side, and step 2
+further out; nearer, step 1 behind the port and step 0 ahead of it. Steps 0 to 4 steer for a point in the port's frame, mirrored
+across it for a ship that came from its right, at full throttle (`ai_steer`, no flags), rolling
+the ship to stand as the port stands (its roll input the roll between them less twice its roll
+rate, in degrees over 40, within 1), each on to the next within 2000 of its point:
+
+| Step | Point, in the port's frame |
+|---|---|
+| 0 | 100000 to the side |
+| 1 | 100000 to the side and 100000 behind |
+| 2 | Twice the ship's cruise speed over its yaw rate to the side, 100000 behind |
+| 3 | 50000 behind, on the port's line |
+| 4 | 10000 behind, on the port's line |
+| 5 | The ship latches on: attached, flying `motion_follow`, the station stopped dead, for 1000 ticks |
+| 6 | It slides in: the path's point stands on the port's line behind the berth, as far back as the ship stood as it latched on, times the square of the share of the 1000 ticks left, with the port's up as the way up. Past them, the ship's motion is `motion_backward`, and the step moves on |
+| 7 | It is stopped dead, set in its berth, heard docking (sound `0x37`, `dock`), and has its Docked (`event_post`); the order pops |
+
+Its exit, the Nanny's too (`0x00407D10`), leaves the ship's first pass-through slot empty. The
+ship stays attached.
+
+**Fix:** where the ship or the station has no docking point, OpenReliant logs it and the order
+ends, where the game stops.
+
+Not ported: the Nanny's, the limpet car's and the limpet pod's styles
+([#320](https://github.com/vdmkenny/openreliant/issues/320)).
 
 ### Picking a fight
 

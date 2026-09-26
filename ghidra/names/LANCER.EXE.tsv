@@ -1668,3 +1668,11 @@ address	kind	name	type	comment
 00403580	function	follow_back_curve	void __fastcall (int slot, Curve *before)	Begins the curve before one on a Follow Curve path backwards, or the path's last for none
 00403600	function	follow_back_way	void __fastcall (int slot, Vec3 *point, Vec3 *up)	Ship Follow Curve Backwards' path for motion_follow: the curve's point as far back from its end as its ticks have gone, then the curve before
 00458600	function	follow_curve_give	uint __fastcall (MissionShip *ship, uint *args, MissionShip *offset)	Gives a ship Ship Follow Curve with the command's curve, seconds and carrying ship as its data
+00406a90	function	dock_port_search	bool __fastcall (int slot, OrderTarget *ship)	Dock's walk: the first port of a ship at which no other object's current order is Dock, into the order's data
+00406c80	function	dock_find_points	void __fastcall (int slot)	Dock's station style: the ship's own first docking point and the port its target names, whose part plays deploy
+00406e70	function	dock_berth	void __fastcall (int slot, Vec3 *position, float *orientation)	Where a docking ship's origin stands docked: the port less its own docking point, in the station's drawn frame, turned as the port
+00406f20	function	dock_way	void __fastcall (int slot, Vec3 *point, Vec3 *up)	Dock's path for motion_follow: along the port's line behind the berth, closing by the square of the slide left; then docked
+00407010	function	dock_station_init	void __fastcall (int slot)	The init of Dock's station style: the docking points, the first step by where the ship stands, and its side
+004070f0	function	dock_station	void __fastcall (int slot)	The update of Dock's station style: round to the port's line, latch on, slide in, then set in the berth and post Docked
+00407d10	function	dock_station_exit	void __fastcall (int slot)	The exit of Dock's station and Nanny styles: the first pass-through slot emptied
+004e1618	data	dock_styles	uint[30]	Dock's five styles: init, update, exit, 0, name and 0 each

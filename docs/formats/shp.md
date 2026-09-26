@@ -149,8 +149,10 @@ gun's spent cases fly from ([Guns](../engine/guns.md#particles-and-bursts)). Kin
 eject point: the flash of a pilot's ejection goes off at the last, and the pod shoots out along its
 Z axis ([Ejection](../engine/ejection.md#the-pod)). Kind 8 is a launch point, where a ship stands
 to launch from the model, turned as the point is: a carrier's torpedo tubes and the Reliant's hangar
-hold them ([Launches](../engine/launch.md#launch-points)). Kind 2 is an engine's glow
-([Rendering](../engine/rendering.md#engine-glows)). **Unknown:** kind 9.
+hold them ([Launches](../engine/launch.md#launch-points)). Kind 9 is a docking point, turned as a
+ship docks there: a ship's own, its first, and a station's ports, counted part by part
+([Docking](../engine/orders.md#docking)). Kind 2 is an engine's glow
+([Rendering](../engine/rendering.md#engine-glows)).
 
 For kinds 1 and 5 the engine mounts the model as an object of its own, hanging from the part's
 node, whose components join the owner's.

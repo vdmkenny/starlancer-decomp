@@ -91,6 +91,7 @@ const implementations = table: {
         .{ "SetFlybackMarker", setFlybackMarker },
         .{ "ResetFlybackMarker", resetFlybackMarker },
         .{ "MatchSpeed", matchSpeed },
+        .{ "Dock", dock },
         .{ "ShipFollowCurve", shipFollowCurve },
         .{ "MovingShipFollowCurve", movingShipFollowCurve },
         .{ "MovingShipBackupCurve", movingShipBackupCurve },
@@ -836,6 +837,29 @@ fn matchSpeed(call: Call) u32 {
     return 1;
 }
 
+/// `cmd_Dock` (`0x00458EB0`, command `0x26`): the ship the first argument names docks (Dock): at
+/// the port the third gives of the ship the second names, or at the first free port of the ships
+/// of a flight group or a squad the second names.
+fn dock(call: Call) u32 {
+    const machine = call.machine;
+    const game = machine.game orelse return 1;
+    const ship = machine.shipIndex(call.args[0]) orelse return 1;
+    if (ship >= game.world.objects.slots.len) return 1;
+    const whole = aigeneric.Target.whole;
+    const target: aigeneric.Target = if (machine.recordKind(call.args[1])) |kind| switch (kind) {
+        .flight_group => .{ .kind = .flight_group, .index = recordIndex(machine.flightGroupIndex(call.args[1])), .component = whole },
+        .squad => .{ .kind = .squad, .index = recordIndex(machine.squadIndex(call.args[1])), .component = whole },
+        else => .{ .kind = .ship, .index = recordIndex(machine.shipIndex(call.args[1])), .component = @truncate(@as(i32, @bitCast(call.args[2]))) },
+    } else .{ .kind = .ship, .index = recordIndex(machine.shipIndex(call.args[1])), .component = @truncate(@as(i32, @bitCast(call.args[2]))) };
+    _ = aigeneric.push(game, ship, .dock, target) catch |err| log.warn("mission ship {d} does not dock: {s}", .{ ship, @errorName(err) });
+    return 1;
+}
+
+/// A record's index as a target holds it, -1 for none.
+fn recordIndex(index: ?u16) i16 {
+    return if (index) |at| @bitCast(at) else -1;
+}
+
 /// `cmd_ShipFollowCurve` (`0x004585D0`, command `0x12`): each ship the first argument names follows
 /// the path from the curve the second names, over the seconds the third gives (`followCurve`).
 fn shipFollowCurve(call: Call) u32 {
@@ -1415,6 +1439,53 @@ test shipType {
     try std.testing.expectEqual(gameobj.Type.grendel, shipType(all, &bound, ships[1]));
     all.mission_number = create.kamov_mission;
     try std.testing.expectEqual(gameobj.Type.kamov, shipType(all, &bound, ships[0]));
+}
+
+test "Dock gives its order at a port, or at a flight group's ports" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    try routine.op(.push_flight_group, &.{0});
+    try routine.command("CreateFlightGroup");
+    // The first Sabre at the Reliant's third port; the second at the Reliant's flight group.
+    try routine.op(.push_ship, &.{1});
+    try routine.op(.push_ship, &.{3});
+    try routine.op(.push_byte, &.{3});
+    try routine.command("Dock");
+    try routine.op(.push_ship, &.{2});
+    try routine.op(.push_flight_group, &.{1});
+    try routine.op(.push_byte, &.{0});
+    try routine.command("Dock");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, 0, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(2, 0, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(3, 1, @intFromEnum(gameobj.Type.reliant), 60),
+        },
+        .flight_groups = &.{ testGroup(4, dte.FlightGroup.no_wing), testGroup(5, dte.FlightGroup.no_wing) },
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    game.world.mission = &fixture.mission;
+    fixture.machine.game = game;
+    try fixture.machine.start();
+
+    const all = world.objects;
+    try std.testing.expectEqual(Order.dock, all.slots[1].orders[0].order);
+    try std.testing.expectEqual(aigeneric.Target.at(3, 3), all.slots[1].orders[0].target);
+    try std.testing.expectEqual(aigeneric.Target{ .kind = .flight_group, .index = 1, .component = aigeneric.Target.whole }, all.slots[2].orders[0].target);
 }
 
 test "the follow commands give their orders along the curves" {

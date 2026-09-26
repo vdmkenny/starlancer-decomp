@@ -13,6 +13,7 @@ const aieject = @import("aieject.zig");
 const aiexplode = @import("aiexplode.zig");
 const aifight = @import("aifight.zig");
 const aiorders = @import("aiorders.zig");
+const aidock = @import("aidock.zig");
 const follow = @import("ai/follow.zig");
 const camera = @import("camera.zig");
 const create = @import("create.zig");
@@ -133,6 +134,7 @@ pub const Entry = extern struct {
         launch: launch.Data,
         /// Ship Follow Curve's and Ship Follow Curve Backwards'.
         follow: follow.Data,
+        dock: aidock.Data,
     };
 
     comptime {
@@ -176,6 +178,7 @@ pub const State = extern union {
     launch: launch.State,
     jump: jump.State,
     follow: follow.State,
+    dock: aidock.State,
     /// What every order that flies a ship by `motion_follow` holds first.
     follower: motion.Follower,
 
@@ -499,6 +502,7 @@ fn runInit(ctx: Context, index: u16, info: orders.Info) void {
         .jump_out, .jump_out_41 => jump.outInit(ctx, index),
         .ship_follow_curve => follow.init(ctx, index),
         .ship_follow_curve_backwards => follow.backwardsInit(ctx, index),
+        .dock => aidock.init(ctx, index),
         else => {},
     }
 }
@@ -536,6 +540,7 @@ fn runUpdate(ctx: Context, index: u16, info: orders.Info) void {
         .jump_out, .jump_out_41 => jump.outUpdate(ctx, index),
         .ship_follow_curve => follow.update(ctx, index),
         .ship_follow_curve_backwards => follow.backwardsUpdate(ctx, index),
+        .dock => aidock.update(ctx, index),
         else => {},
     }
 }
@@ -547,6 +552,7 @@ fn runExit(ctx: Context, index: u16, info: orders.Info) void {
         .disrupted => aiorders.disruptedExit(ctx, index),
         .ship_follow_curve => follow.exit(ctx, index),
         .ship_follow_curve_backwards => follow.backwardsExit(ctx, index),
+        .dock => aidock.exit(ctx, index),
         else => {},
     }
 }

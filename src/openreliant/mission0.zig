@@ -12,9 +12,10 @@
 //! Its script's start part makes the Reliant's flight group, then every other, so that the wing
 //! finds the Reliant to launch from as it is made, has an ejected pilot fare each way as likely and
 //! the rocks tumble slowly (Random Spin Slow), and plays the launch's music. It starts the wing's
-//! launch and waits until the wing is out (`WaitForJumpOrLaunch`), as mission 1 does. Then the
-//! Reliant and the Badanov fly on at a tenth of their speed, the Sabres fight the player and each
-//! wingman a Sabre, and the mission's music follows the launch's. The Sabres' pilot is record 42 of
+//! launch and waits until the wing is out (`WaitForJumpOrLaunch`), as mission 1 does, the capital
+//! ships holding their fire meanwhile (`DisableGuns`). Then the Reliant and the Badanov fly on at a
+//! tenth of their speed, free to fire, the Sabres fight the player and each wingman a Sabre, and
+//! the mission's music follows the launch's. The Sabres' pilot is record 42 of
 //! `pilotstats.bin`, one of its weakest, where the game gives a Sabre the sharp pilot of record 66,
 //! so the player's missiles mostly get past their countermeasures.
 
@@ -80,6 +81,12 @@ const across_yaw = 63;
 /// The speed the capital ships fly at once the wing is out: a tenth of the 100 the Reliant's type
 /// cruises at.
 const crawl_speed = 10;
+
+/// The capital ships, which hold their fire until the wing is out and then fly on at a crawl.
+/// Their Huge Guns lead a target a quarter of their shots' life away, 600000 at 1200 a tick for
+/// 2000 ticks (`gunstats.bin`), which the Badanov stands well within, so they would fire over the
+/// launch, beside the player's hangar.
+const capital_ships = [_]Group{ .reliant, .badanov };
 
 /// The music the launch plays to, and the mission's after it, from the game's music folder.
 const launch_music = "new_launch.wav";
@@ -292,8 +299,9 @@ comptime {
 }
 
 /// The start part: every flight group made, the ejected pilot's odds each as likely, the rocks
-/// tumbling, the launch's music, and the wing's launch. Once the wing is out, the capital ships fly
-/// at a crawl, the Sabres fight the player and each wingman a Sabre, and the mission's music plays.
+/// tumbling, the capital ships' guns held, the launch's music, and the wing's launch. Once the wing
+/// is out, the capital ships fly at a crawl, their guns free, the Sabres fight the player and each
+/// wingman a Sabre, and the mission's music plays.
 fn script(gpa: Allocator) ![]u8 {
     var routine: Routine = .init(gpa);
     defer routine.deinit();
@@ -304,12 +312,14 @@ fn script(gpa: Allocator) ![]u8 {
     for ([_]u8{ 33, 33, 34 }) |odds| try routine.pushConstant(odds);
     try routine.command("SetRescueProbabilities");
     try setAI(&routine, .{ .group = .rocks }, .random_spin_slow, null);
+    for (capital_ships) |group| try disableGuns(&routine, .{ .group = group }, true);
     try playMusic(&routine, launch_music);
     try routine.op(.push_flight_group, &.{@intFromEnum(Group.alpha)});
     try routine.command("StartLaunch");
     try routine.op(.push_flight_group, &.{@intFromEnum(Group.alpha)});
     try routine.command("WaitForJumpOrLaunch");
-    for ([_]Group{ .reliant, .badanov }) |group| {
+    for (capital_ships) |group| {
+        try disableGuns(&routine, .{ .group = group }, false);
         try routine.op(.push_flight_group, &.{@intFromEnum(group)});
         try routine.op(.push_null, &.{});
         try routine.pushConstant(crawl_speed);
@@ -336,16 +346,29 @@ const Entity = union(enum) {
     group: Group,
 };
 
-/// `SetAI` of `order` on `entity`, aimed at the ship `target`, or at nothing, starting at once.
-fn setAI(routine: *Routine, entity: Entity, order: Order, target: ?usize) !void {
+/// Pushes the ship or the flight group `entity` names, for a command that takes an entity.
+fn pushEntity(routine: *Routine, entity: Entity) !void {
     switch (entity) {
         .ship => |ship| try routine.op(.push_ship, &.{@intCast(ship)}),
         .group => |group| try routine.op(.push_flight_group, &.{@intFromEnum(group)}),
     }
+}
+
+/// `SetAI` of `order` on `entity`, aimed at the ship `target`, or at nothing, starting at once.
+fn setAI(routine: *Routine, entity: Entity, order: Order, target: ?usize) !void {
+    try pushEntity(routine, entity);
     try routine.pushConstant(@intCast(@intFromEnum(order)));
     try routine.pushConstant(1);
     if (target) |ship| try routine.op(.push_ship, &.{@intCast(ship)}) else try routine.op(.push_null, &.{});
     try routine.command("SetAI");
+}
+
+/// `DisableGuns` on `entity`: its guns and turrets held, or free again, as the game's missions give
+/// it, the entity and then 1 or 0.
+fn disableGuns(routine: *Routine, entity: Entity, disabled: bool) !void {
+    try pushEntity(routine, entity);
+    try routine.pushConstant(@intFromBool(disabled));
+    try routine.command("DisableGuns");
 }
 
 /// Writes mission 0's file to the path its argument gives, for the build.
@@ -417,8 +440,17 @@ test "the wing waits in the Reliant's tubes as the mission starts, its launch st
         try std.testing.expectEqual(reliant, entry.target.slot().?);
         try std.testing.expect(entry.data.launch.go);
     }
-    // The capital ships wait with the script for the wing to be out.
+    // The capital ships wait with the script for the wing to be out, their guns held.
+    const badanov: u16 = 5;
     try std.testing.expectEqual(Order.do_nothing, world.objects.slots[reliant].current().?.order);
+    for ([_]u16{ reliant, badanov }) |ship| try std.testing.expect(world.objects.slots[ship].object.flags.guns_disabled);
+    // Once the wing is out, they fly on at a crawl, free to fire.
+    for (0..4) |ship| _ = game.aigeneric.pop(orders, @intCast(ship));
+    loaded.process(orders);
+    for ([_]u16{ reliant, badanov }) |ship| {
+        try std.testing.expectEqual(Order.fly, world.objects.slots[ship].current().?.order);
+        try std.testing.expect(!world.objects.slots[ship].object.flags.guns_disabled);
+    }
 }
 
 test "the Reliant flies at a crawl" {

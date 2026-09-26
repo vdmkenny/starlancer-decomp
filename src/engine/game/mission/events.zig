@@ -341,10 +341,23 @@ const no_weapon: u32 = 0xFFFF_FFFF;
 /// `event_launched` (`0x0045A9B0`): the object in slot `index` has launched. Its ship's Launched,
 /// with the ship, goes on to its groups.
 pub fn launched(world: gameobj.World, index: u16) void {
+    postWithShip(world, index, .launched);
+}
+
+/// `event_jumped_in` (`0x0045B300`): the object in slot `index` has jumped in (`jump.inUpdate`).
+/// Its ship's JumpedIn, with the ship, goes on to its groups.
+pub fn jumpedIn(world: gameobj.World, index: u16) void {
+    postWithShip(world, index, .jumped_in);
+}
+
+/// The ship of the object in slot `index` posts `condition` with itself as its value, which goes
+/// on to its groups, as `event_launched`, `event_jumped_in` and `event_post_explosion` do. An
+/// object that stands for no mission's ship posts nothing.
+fn postWithShip(world: gameobj.World, index: u16, condition: dte.Condition) void {
     const events = world.events orelse return;
     const ship = events.shipOf(index) orelse return;
     var values = [_]u32{events.value(index)};
-    events.postGroup(ship, .{ .condition = .launched, .values = &values });
+    events.postGroup(ship, .{ .condition = condition, .values = &values });
 }
 
 /// `event_shot_at` (`0x0045A9E0`): the object in slot `index` is hit by the one in slot
@@ -395,10 +408,7 @@ pub fn scooped(world: gameobj.World, index: u16, object: u16) void {
 /// `event_post_explosion` (`0x0045AB50`): the explosion that the object in slot `index` set off is
 /// over. Its ship's ExplosionShip, with the ship, goes on to its groups.
 pub fn exploded(world: gameobj.World, index: u16) void {
-    const events = world.events orelse return;
-    const ship = events.shipOf(index) orelse return;
-    var values = [_]u32{events.value(index)};
-    events.postGroup(ship, .{ .condition = .explosion_ship, .values = &values });
+    postWithShip(world, index, .explosion_ship);
 }
 
 /// The object in slot `index` cloaks, or uncloaks (`object_cloak`, `object_uncloak`): its ship's

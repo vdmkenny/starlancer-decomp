@@ -152,7 +152,7 @@ address	kind	name	type	comment
 0045ab10	function	event_ripper_grabbed	void __fastcall (GameObject *object, int slot)	Posts RipperGrabbedObject with the groups for an object's ship: the ship of the object in slot
 0045ab90	function	event_ripper_dropped	void __fastcall (GameObject *object, int slot)	Posts RipperDroppedObject with the groups for an object's ship: the ship of the object in slot
 0045abd0	function	event_fixed_gate_jumped_in	void __fastcall (GameObject *object, int slot)	Posts FixedGateJumpedIn with the groups for an object's ship: the ship of the object in slot
-0045b300	function	event_jumped_in	void __fastcall (GameObject *object)	Posts JumpedIn with the groups for an object's ship: the ship itself
+0045b300	function	event_jumped_in	void __fastcall (GameObject *object)	Posts JumpedIn with the groups for an object's ship, as Jump In ends: the ship itself
 0045ac10	function	event_post_ship_reached	void __fastcall (MissionShip *ship, MissionShip *reached)	Posts ShipReached on a ship for its own triggers: the ship that came within reach
 00451180	function	event_camera_reached	void __fastcall (MissionShip *ship)	Posts CameraReached on a ship, where there is one
 0045af60	function	mission_proximity_check	void (void)	Once the script's clock has ticked, after the timers: the watches of CloseProximity, Proximity and ShipReached look for ships close by
@@ -755,7 +755,7 @@ address	kind	name	type	comment
 00566790	data	hud_prompt_ticks	int	The count hud_jump_prompt flashes by
 005667b0	data	hud_scanner_next	int	The game tick after which hud_scanner moves on a frame
 00566f8c	data	blind_fire_fitted	int	Whether the player's ship carries blind fire, which the mission's start decides by its type
-00569718	data	hud_brightness	float	The brightness hud_draw makes VFX's global palette at: 1, which hud_init sets and nothing changes
+00569718	data	hud_brightness	float	The brightness hud_draw makes VFX's global palette at: 1, which hud_init and Jump In's end set and nothing changes
 00569938	data	hud_eject_ticks	int	The count hud_eject_marker flashes by, which order_eject_player_init starts again
 0056996c	data	smart_targeting	ushort	Smart targeting, which SMART TARGET flips (hud_target_keys)
 00579986	data	player_ejected	ushort	Set by order_eject_player_init; while it is, hud_eject_marker flashes
@@ -859,8 +859,31 @@ address	kind	name	type	comment
 004744e0	function	motion_downward	void __fastcall (int slot)	The plain flight model along the object's Y axis, which points below it: object_steer without throttle turns, then the velocity through the flight model's inertia toward the throttle times its top speed, the last throttle nothing; a fighter flies by the first ship type's flight model (0x004F9E70). Selected by the Reliant's launch and the Ripper
 00474570	function	motion_plain	void __fastcall (int slot)	motion_downward along the object's Z axis, keeping the throttle as the last, the Ripper flying by its own flight model whatever its class: a flight model with no throttle rules or burns. Selected by a torpedo's launch, the Ripper and the landing orders
 00474610	function	motion_brake	void __fastcall (int slot)	Slows the object to 0.97 of its velocity each update. Selected by the Eject order
-00474640	function	motion_jump_out	void __fastcall (int slot)	Moves the object to a point between the two in its order state (+0x5C, +0x68), each coordinate eased (0x00426900) by the time since the jump started; no rotation. Selected by the Jump Out order
-004746d0	function	motion_jump_in	void __fastcall (int slot)	Flies the object along its nose at 2400 (600 without components), less 0.003 of that per unit of time since the jump started, but never slower than its cruise speed; no rotation. Selected by the Jump In order
+00474640	function	motion_jump_out	void __fastcall (int slot)	Moves the object to the point between the two in its JumpState (+0x5C, +0x68) by the square of 0.004 a tick of mission_ticks since its step began (+0x08), each coordinate eased (0x00426900); no rotation, last throttle nothing. Selected by Jump Out as the ship goes
+004746d0	function	motion_jump_in	void __fastcall (int slot)	Flies the object along its nose at 2400 (600 without components), less 0.003 of that for each tick of frame_start since it was placed (JumpState +0x08), but never slower than its cruise speed; no rotation, last throttle nothing. Selected by Jump In as the ship flies in
+00416490	function	jump_init	void (void)	Readies the jumps as a mission loads: makes the flare's mesh (jump_flare_mesh), loads the trails' texture (jump_trail_texture), and clears jump_player_going and jump_arriving
+00416510	function	jump_free	void (void)	Frees jump_flare_mesh as a mission ends
+00417670	function	jump_effect_start	void __fastcall (int slot)	Begins Jump Out's effect as the ship is held still: keeps how the ship is turned and where it stands (+0x18, +0x3C), aims its motion 500000 along the way to its destination (+0x68), and makes its burst behind it, a trail at each attachment of kind 7 (five at most) and a light at each of kind 8 (twenty at most)
+00417af0	function	jump_trail_mesh	void * __fastcall (int slot, bool components)	Makes a jump's trail mesh (JumpTrail Mesh): 100 by 100 by 20000, or 1000 by 1000 by 40000 for a ship that lists components, flipped for the Ripper
+00417dc0	function	model_show_finest	void __fastcall (ModelNode *node, bool finest)	Sets or clears bit 8 of the scene object flags of each node of a model and of the models mounted on it, which draws them at their finest level
+00417e30	function	jump_burst_mesh	void * __fastcall (bool arriving)	Makes a jump's burst mesh (JumpBurst Mesh): six rings of twelve, with the shield texture, for Jump In where arriving and else for Jump Out
+00418120	function	jump_flare_object	void * (float width)	A scene object of jump_flare_mesh (Jump flare mesh), scaled to width
+00418150	function	jump_burst_fade	void __thiscall (void *burst, float share)	Greys a jump burst's rings by their place times share times 0.1, opaque
+004181c0	function	jump_burst_glow	void __thiscall (void *burst, float share)	Lights a jump burst, on the hardware renderers and on the software one apart
+00418390	function	jump_trail_stretch	void __thiscall (void *trail, float share)	Stretches a jump's trail, its vertices placed by share times 0.3
+00418470	function	jump_mark	void __fastcall (int slot)	Marks an object in the way of a formation's Jump Out as jumping, and in turn each fuel pod (type 0xE1) and each ship whose Launch or Dock names it, but stand-ins and disabled and jumping ones
+004184f0	function	jump_out_place	void __fastcall (JumpState *state, int slot)	Where Jump Out takes a ship: in formation behind the player's ship when the player's order is Jump Out at the same target, rows 3000 apart, 150 ahead, clearing its way 500000 ahead (jump_mark); else to its target, or 1e7 ahead
+00418850	function	jump_in_place	void __fastcall (JumpState *state, int slot)	Where Jump In brings a ship: abreast of its target where it is drawn, turned as it is, by the order's number 3000 apart to the right and the left in turn
+00418900	function	jump_effect_alloc	void * (void)	Allocates a jump's effect record, 0x94 bytes, cleared, into the first free of the 64 jump_effects; null when all are taken
+004189a0	function	jump_effect_free	void __fastcall (void *effect)	Lets a jump's effect record go (0x004189D0)
+0051cfa4	data	jump_effects	void *[64]	The jumps' effect records, 0x94 bytes each: trails, lights, burst and flare; Jump In stops with Jump has overrun array when all are taken
+0051d0a4	data	jump_countdown_step	float	1/15, which order_jump_out_init sets and nothing reads
+0051d0a8	data	jump_flare_mesh	void *	The jump flare's mesh, which jump_init makes
+0051d0ac	data	jump_trail_texture	void *	The jump trails' texture, which jump_init loads
+0051d0b0	data	jump_player_going	byte	Set while the player's ship is on its Jump Out, which gates jump_countdown; jump_init and Jump Out's end clear it
+0051d0b4	data	jump_countdown	int	15 from order_jump_out_init, counted down every 10 game ticks while jump_player_going; nothing reads it
+0051cfa0	data	jump_countdown_next	int	The game tick past which jump_countdown next counts down
+005e82f0	data	jump_arriving	byte	Set while the player's ship jumps in, from Jump In's placing to its flight's end, which cuts the space dust's streaks to a quarter (stars_project); jump_init clears it
 00474770	function	motion_follow	void __fastcall (int slot)	Steers toward the point the order state's callback gives and moves toward it, no faster than the order state's speed limit. Selected by the Follow Curve and Dock orders
 00474930	function	motion_follow_backwards	void __fastcall (int slot)	motion_follow with the angles to the point negated, for flying tail first
 00474b00	function	motion_drift	void __fastcall (int slot)	Slows the object to 0.99 of its velocity each update. Selected by the Jump In order

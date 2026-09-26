@@ -34,6 +34,10 @@ OpenReliant keeps the factor down and chooses the factor across that keeps pixel
 | 0x1B | | From where the camera was, watching where the player's ship burst (`explode_marker`), which drifts on at a quarter of its velocity a frame | a space |
 | 0x1C | | Round the ship picking up the player's pod, closing in | a space |
 | 0x1D | | From behind the player's pod, at the Sabre that shoots it down | a space |
+| 0x17 | | Close ahead of the player's ship and above it, looking back at it as it jumps in ([The jumps' views](#the-jumps-views)) | a space |
+| 0x18 | | Far ahead of where the player's ship jumps in, held | a space |
+| 0x19 | | Beside where the player's ship jumps in, watching it | a space |
+| 0x27 | | Out along each of the player's ship's axes, watching it jump out | a space |
 | 0x20 | | From within a launch's bay, beside the ship, looking down after it as it drops ([Launches](launch.md#the-cutaways)) | a space |
 | 0x21 | | From far below a launching ship, looking up at it | a space |
 | 0x22 | | From beside and below a launching ship, looking at it, the whole scene shown | a space |
@@ -120,5 +124,31 @@ objects they watch do; the game moves them a tick at a time, which a display's f
 unevenly. `--no-smooth-motion` and `--original` move them on ticks.
 
 **Improvement:** view `0x1C`'s quarter turn is exact; the game's is 0.785398.
+
+## The jumps' views
+
+The player's [jumps](jump.md) switch to their views held and forced, with the player's ship as the
+object. `camera_set_view` places the camera, and `camera_frame` moves it, with `t` the ticks since:
+
+- View `0x27`, as Jump Out begins: the camera stands 8000 out along each of the ship's axes, from
+  where the ship stands then (`0x0045FB18`), and looks at it.
+- View `0x17`, one of Jump In's three: the camera stands 200 to the right of the ship, 500 above it
+  and ahead of it by 1200, from 50 ticks on by `1200 + 10 (t - 50)`, and from 70 on by 1400
+  (`0x00460EC5`), looking at it, in the ship's frame each frame. While hits shake the cockpit
+  (`hit_shake`), the camera shakes with them as it does in view 0; Jump In's flight sets the shake.
+  `camera_set_view` first places it 50000 ahead of the ship and 500 above it, which `camera_frame`
+  replaces at once.
+- View `0x18`: the camera stands 27000 ahead of the ship and 300 below it as the ship stands placed
+  to fly in, 25000 behind where it arrives (`0x0045F8E7`), and holds there, looking at where the
+  ship stood, level in the ship's frame: the look is taken with both points turned into the ship's
+  frame, and turned out of it again.
+- View `0x19`: the camera stands 2000 to the ship's left, 100 above it and 25000 ahead, likewise
+  (`0x0045F91E`), and looks at the ship each frame.
+
+`camera_set_view` moves the camera's marker (`0x00588390`) to where views `0x18` and `0x19` stand.
+OpenReliant's camera keeps its own place for them, as for the flyby and target views.
+
+**Improvement:** with smooth motion, view `0x17` pulls away by the share of a tick the frame is
+drawn past its tick as well, as [the ejection's views](#the-ejections-views) do.
 
 This page leaves out the cockpit's model and its motion, the shake from hits (`hit_shake`, `0x588724`) and the other cutaways.

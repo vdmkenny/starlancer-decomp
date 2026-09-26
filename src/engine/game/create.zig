@@ -342,6 +342,9 @@ pub const Slot = struct {
     model: ?objects.Model = null,
     /// What moves it each update (`GameObject.motion`); null for nothing.
     motion: ?motion.Motion = null,
+    /// The motion a jump puts aside while it flies its own, and gives back as it ends
+    /// (`jump.State.motion`, which the game keeps as the routine's address).
+    motion_aside: ?motion.Motion = null,
     /// How far it goes a tick where the orders place it from tick to tick rather than move it: it
     /// is drawn that much further along for the time the frame is past its tick
     /// (`objects.frameTree`). The orders set it each frame they place it, and the frame's pass

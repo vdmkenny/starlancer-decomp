@@ -148,7 +148,14 @@ pub const Field = struct {
     /// Last frame's rotation into the camera's frame, and the dust's offset from the camera.
     previous_rotation: math.Matrix = math.identity,
     previous_offset: Vector = @splat(0),
+    /// Dust: its streaks cut to a quarter of the usual length (`jump_stretch`), as they are while
+    /// the player's ship jumps in (`0x005E82F0`).
+    shortened: bool = false,
 };
+
+/// How many times shorter the dust's streaks are cut while the player's ship jumps in
+/// (`0x004DC424`).
+const jump_stretch: f32 = 4;
 
 pub const Star = struct {
     /// Sky: `(x, y, 1)` in the field's frame. Dust: in the cube.
@@ -219,7 +226,7 @@ pub fn project(arena: Allocator, context: *const srapi.Context, field: *Field) A
                 var now: [2]f32 = undefined;
                 var before: [2]f32 = undefined;
                 if (!dustStreak(context.projection, &now3, &before3, &now, &before)) continue;
-                const motion = shorten(now, &before, 1);
+                const motion = shorten(now, &before, if (field.shortened) jump_stretch else 1);
                 try visible.append(arena, .{
                     .index = @intCast(index),
                     .now = now,

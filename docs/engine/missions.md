@@ -77,7 +77,8 @@ makes as the mission starts, before its script, once the players' slots are know
 ## The mission's start
 
 Before each mission, the loading (`0x004AD0A0`) puts a stand-in in every object's slot
-(`objects_reset`) and loads the Turret Flak's shell and the debris. Then `mission_start`
+(`objects_reset`), loads the Turret Flak's shell and the debris, and readies the jumps
+(`jump_init`, `0x00416490`, [Jumps](jump.md#what-a-jump-shows)). Then `mission_start`
 (`0x004934F0`):
 
 1. ends the 3D sounds, resets the clocks and the camera, and sets the rescue odds to the pilot always

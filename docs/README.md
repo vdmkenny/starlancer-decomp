@@ -47,6 +47,7 @@ Guides for installing, configuring and playing OpenReliant:
 | [`engine/hud.md`](engine/hud.md) | The head-up display: how it is reached, where an element stands, its text and its art. |
 | [`engine/orders.md`](engine/orders.md) | Orders: the table of what objects can be told to do, each object's stack, and how orders run. |
 | [`engine/launch.md`](engine/launch.md) | Launches: the Launch order, its styles, the Reliant's launch and its cutaways, the torpedoes'. |
+| [`engine/jump.md`](engine/jump.md) | Jumps: Jump Out and Jump In, the player's formation, their motions and views, and the JumpedIn event. |
 | [`engine/maneuvers.md`](engine/maneuvers.md) | Combat maneuvers: the scripts Fight runs, their language, and how it chooses them. |
 | [`port/platform.md`](port/platform.md) | The platform: the `openreliant` executable on SDL3, how to build and run it on each system, the installer, and joysticks and gamepads. |
 | [`port/renderer.md`](port/renderer.md) | The renderer: Surrender's pipeline and Direct3D driver as ported, the software reference device, improvements and what is not yet ported. |

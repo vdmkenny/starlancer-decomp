@@ -208,6 +208,7 @@ event that a trigger's thread posts as it runs at once waits its turn in the sam
 | ShotAt | `event_shot_at` (`0x0045A9E0`), with the groups: last in `object_damage` and in `object_armor_damage`, unless `0x00545860` holds it back; and in `component_damage`, for the ship but for damage of kind 4, and for the component struck | The attacker's ship, the ship's damage value twice, the ship, -1 |
 | Destroyed | `event_destroyed` (`0x0045AA60`), with the groups: as a ship's Explode begins (`0x004086F0`), and the limpet car's (`explode_limpet_car_init`); as a pilot ejects (`order_eject_init`, `order_eject_spin_init`); as a ship's hull is lost (`object_hull_lost`); and for each component `node_draw` takes out | The ship of what struck it last (`last_attacker`), the ship |
 | Launched | `event_launched` (`0x0045A9B0`), with the groups, as each launch style ends ([Launches](launch.md)) | The ship |
+| JumpedIn | `event_jumped_in` (`0x0045B300`), with the groups, as Jump In ends ([Jumps](jump.md#jump-in)) | The ship |
 | ObjectScooped | `0x0045AAD0`, with the groups, as Scoop Up has the pod aboard ([Ejection](ejection.md)) | The pod's ship |
 | ExplosionShip | `event_post_explosion` (`0x0045AB50`), with the groups, as the Uber Explode ends ([Effects](effects.md)) | The ship |
 | Cloaked, Decloaked | `object_cloak`, `object_uncloak` ([Cloak](cloak.md)) | None |
@@ -397,5 +398,5 @@ Not ported: the script debugger, the table of curve weights `mission_script_star
 (`0x00456F00`), and the ships the mission's sub-objects name, which it makes after the start part
 where the part has not (`0x004571D0`), with the sub-objects
 ([#281](https://github.com/vdmkenny/openreliant/issues/281)); and the events that code OpenReliant
-does not run yet posts, such as JumpedIn from the jump orders
+does not run yet posts, such as FixedGateJumpedIn from the gates' jumps
 ([#307](https://github.com/vdmkenny/openreliant/issues/307)).

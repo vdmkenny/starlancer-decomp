@@ -900,6 +900,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
             .sky = sky,
             .view = view.view,
             .cockpit_mode = view.cockpit_mode,
+            .jumping_in = player.jumping_in,
             .last_view = last_view,
             .overlay = display.overlay(),
             .cockpit = if (cockpit.shown) |*shown| &shown.model else null,

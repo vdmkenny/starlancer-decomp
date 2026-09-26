@@ -170,7 +170,7 @@ commands and their like set; the names in quotes are the developers' labels for 
 | `0x40000` | `eject_disabled` | `DisableEject`. The player cannot eject. |
 | `0x80000` | `do_not_disturb` | `DoNotDisturb`, "dont disturb", which the command describes as keeping comms from disturbing it. It does not retaliate either. |
 | `0x100000` | `no_avoidance` | `SetShipAvoidance` with "Disable Avoidance code": the avoidance code passes it over. |
-| `0x200000` | `jumping` | Set during the jump orders. It cannot fire, and the avoidance code passes it over. |
+| `0x200000` | `jumping` | Set during the jump orders, and on what lies in the way of the player's formation as it jumps out until the player's jump ends ([Jumps](jump.md#jump-out)). It cannot fire, the avoidance code passes it over, and so do the frame's passes over the objects. |
 | `0x400000` | `attached` | Set while the Dock and Ripper orders hold it to another object; their ends clear it. |
 | `0x10000000` | | **Unknown.** Set by `0x00474B40` as it sends a ship off, the player's into Friendly Fire and others into Jump Out, and cleared by Friendly Fire. It takes no orders while it is set. |
 | `0x20000000` | `unlisted` | `DisableListing`, "stop listing". |
@@ -464,8 +464,9 @@ rounded to the nearest step.
 
 The orders select eight more motion functions, which read the order's state (`0x68C`). OpenReliant
 has the two the [ejection](ejection.md) selects, `motion_brake` (`0x00474610`) and `motion_drift`
-(`0x00474B00`), and the two the [launches](launch.md) select, `motion_downward` (`0x004744E0`) and
-`motion_plain` (`0x00474570`); the rest aren't ported yet
+(`0x00474B00`), the two the [launches](launch.md) select, `motion_downward` (`0x004744E0`) and
+`motion_plain` (`0x00474570`), and the two of the [jumps](jump.md#the-motions), `motion_jump_out`
+(`0x00474640`) and `motion_jump_in` (`0x004746D0`); the rest aren't ported yet
 ([#30](https://github.com/vdmkenny/openreliant/issues/30)).
 
 | Address | Selected by | What it does |
@@ -473,11 +474,11 @@ has the two the [ejection](ejection.md) selects, `motion_brake` (`0x00474610`) a
 | `0x004744E0` | The Reliant's launch, the Ripper | The plain flight model along the object's Y axis, which points below it: steers, the throttle slowing no turn, then moves the velocity through the flight stats' `inertia` toward the throttle times `max_speed`, the last update's throttle nothing. A fighter (class 1) flies by the first ship type's flight stats, the Predator's (`ship_flight_stats`, `0x004F9E70`), so that every fighter leaves its carrier alike. |
 | `0x00474570` | A torpedo's launch, the Ripper, landing orders | The same along the Z axis, keeping the throttle as the last update's, and the Ripper flies by its own stats whatever its class. A flight model without the throttle rules or the burns. |
 | `0x00474610` | Eject | Slows the velocity to 0.97 of itself each update. |
-| `0x00474640` | Jump Out | Places the object between the two points of the order's state, each coordinate eased by the time since the jump started. No rotation. |
-| `0x004746D0` | Jump In | Flies along the nose at 2400, or 600 for an object without components, less 0.003 of that per unit of time since the jump started, but never slower than the cruise speed. No rotation. |
+| `0x00474640` | Jump Out | Moves the object to the point between the two of the order's state by the square of the share of 250 ticks since it went. No rotation, the last update's throttle nothing. |
+| `0x004746D0` | Jump In | Flies along the nose at 2400 for an object that lists components, or 600, less 0.003 of that for each tick since the jump placed it, but never slower than the cruise speed. No rotation, the last update's throttle nothing. |
 | `0x00474770` | Follow Curve, Dock | Steers toward the point the order's state gives and moves toward it, no faster than the order's speed limit. |
 | `0x00474930` | Follow Curve | The same, flying tail first. |
-| `0x00474B00` | Jump In, and the ship a pilot has left (`eject_separate`) | Slows the velocity to 0.99 of itself each update. |
+| `0x00474B00` | The ship a pilot has left (`eject_separate`) | Slows the velocity to 0.99 of itself each update. |
 
 ### Porting
 

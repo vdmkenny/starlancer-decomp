@@ -255,6 +255,9 @@ pub const Frame = struct {
     sky: *nebula.Sky,
     view: camera.View,
     cockpit_mode: camera.CockpitMode,
+    /// Whether the player's ship jumps in, which cuts the dust's streaks shorter
+    /// (`input.Player.jumping_in`).
+    jumping_in: bool = false,
     /// Last frame's view (`camera_view_last`, `0x00539A64`).
     last_view: camera.View,
     /// What the models' own lights and engine glows are drawn by; each object's own offset into
@@ -714,6 +717,7 @@ pub fn drawFrame(gpa: Allocator, arena: Allocator, scene: *srcore.Scene, context
         if (shaken) |interference| interference.fade(attachments.frame_start);
     };
     if (frame.shockwaves) |waves| try waves.draw(gpa, scene, frame.ahead);
+    frame.space.shortenDust(frame.jumping_in);
     try frame.space.frame(gpa, scene, context, frame.view, frame.cockpit_mode);
     if (context.hardware) try frame.sky.frame(gpa, scene, context);
     if (frame.view == .cockpit and frame.cockpit_mode == .cockpit and context.hardware) {
@@ -1377,8 +1381,9 @@ const camera_marker_at: math.Vector = .{ 0, 0, -8000 };
 ///
 /// The loading readies the display's objectives and the launch's caption for the mission
 /// (`hud_init`), empties the effects' pools and the missiles in flight, puts a stand-in in every
-/// object's slot (`create.Objects.reset`), and loads the Turret Flak's shell and the debris
-/// (`guns_load_shell`, `explosions_init`). Then the start:
+/// object's slot (`create.Objects.reset`), loads the Turret Flak's shell and the debris
+/// (`guns_load_shell`, `explosions_init`), and clears the mark of the player's ship jumping in
+/// (`jump_init`). Then the start:
 /// 1. ends the 3D sounds, has the mission play with everything shown, no ship the player launched
 ///    from, the camera in the cockpit mode the options' setting picks and the ejected pilot always
 ///    picked up, and puts back the pilot's kills (`winmain.startMission`);
@@ -1433,6 +1438,7 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     world.player.rescue_odds = .{};
     world.player.carrier = null;
     world.player.cutaway = .none;
+    world.player.jumping_in = false;
     if (world.camera) |view| view.cockpit_mode = view.setting.mode();
     winmain.startMission(world.player);
     all.mission_number = number;

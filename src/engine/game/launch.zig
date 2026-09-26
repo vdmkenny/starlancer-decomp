@@ -201,7 +201,7 @@ pub fn init(ctx: aigeneric.Context, index: u16) void {
         entry.target.index = @truncate(state.carrier);
         entry.target.component = @truncate(state.gate);
     }
-    const carrier = carrierOf(all, entry.target) orelse return;
+    const carrier = entry.target.slotIn(all) orelse return;
     const carrier_type = all.slots[carrier].object.type;
     const style = Style.of(slot.object.type, carrier_type, entry.target.component);
     // The game leaves the style it cleared as the order started, the first.
@@ -225,13 +225,6 @@ pub fn init(ctx: aigeneric.Context, index: u16) void {
     ai.setTargetable(&slot.object, slot.combat, false);
 }
 
-/// The slot of the carrier `target` names by its index, whatever its kind, where it names one
-/// within the objects.
-fn carrierOf(all: *const create.Objects, target: aigeneric.Target) ?u16 {
-    const carrier = target.slot() orelse return null;
-    return if (carrier < all.slots.len) carrier else null;
-}
-
 /// `order_launch` (`0x004191C0`): the launch of the ship in slot `index`, an update at a time.
 /// Before its style's steps, a carrier gone, a stand-in or exploding, ends the ship with it
 /// (`ai.objectDestroyed`), save an escape pod leaving the Ulysses as it is lost. Once StartLaunch
@@ -250,7 +243,7 @@ pub fn update(ctx: aigeneric.Context, index: u16) void {
     const state = &slot.state.launch;
     const now = ctx.clock.frame_start;
     if (!state.step.isStyled()) {
-        const carrier = carrierOf(all, entry.target) orelse return letGo(ctx, index);
+        const carrier = entry.target.slotIn(all) orelse return letGo(ctx, index);
         const from = &all.slots[carrier].object;
         const gone = from.type == .stand_in or from.flags.exploding;
         if (gone and !(from.type == .ulysses and slot.object.type == .escape_pod)) {
@@ -317,7 +310,7 @@ pub fn hold(all: *create.Objects, index: u16) void {
     const slot = &all.slots[index];
     const entry = slot.current() orelse return;
     if (entry.order != .launch) return;
-    const carrier = carrierOf(all, entry.target) orelse return;
+    const carrier = entry.target.slotIn(all) orelse return;
     if (all.slots[carrier].object.flags.exploding) return;
     const state = &slot.state.launch;
     if (!state.attached) return;
@@ -394,7 +387,7 @@ const GateSearch = struct {
 
     pub fn visit(search: *GateSearch, carrier: aigeneric.Target) bool {
         const state = search.state;
-        const index = carrierOf(search.all, carrier) orelse return false;
+        const index = carrier.slotIn(search.all) orelse return false;
         state.carrier = index;
         state.gate = 0;
         const model = if (search.all.slots[index].model) |*held| held else return false;

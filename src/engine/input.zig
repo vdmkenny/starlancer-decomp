@@ -996,6 +996,10 @@ pub const Player = struct {
     carrier: ?u16 = null,
     /// The cutaway the player's launch from the Reliant shows.
     cutaway: @import("game/launch/reliant.zig").Cutaway = .none,
+    /// `0x005E82F0`: set while the player's ship jumps in, which cuts the dust's streaks shorter
+    /// (`srstars.Field.shortened`); the loading before a mission's start clears it (`jump_init`,
+    /// `0x00416490`).
+    jumping_in: bool = false,
     /// What the radio leaves unsaid, as a mission's script asks: the enemy's taunts
     /// (`DisableTaunts`, `0x00529CB4`), and the remarks the game makes by itself, on a kill, a ship
     /// lost, a missile coming or a launch (`DisableGenericComms`, `0x00529538`). The radio's lines,

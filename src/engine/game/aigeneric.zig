@@ -18,6 +18,7 @@ const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const guns = @import("guns.zig");
 const input = @import("../input.zig");
+const jump = @import("jump.zig");
 const launch = @import("launch.zig");
 const Clock = @import("main.zig").Clock;
 const orders = @import("ai/orders.zig");
@@ -57,6 +58,12 @@ pub const Target = extern struct {
     /// takes it for a ship's; null for none.
     pub fn slot(target: Target) ?u16 {
         return std.math.cast(u16, target.index);
+    }
+
+    /// `slot`, where it is one of `all`'s slots, which the game takes on trust.
+    pub fn slotIn(target: Target, all: *const create.Objects) ?u16 {
+        const index = target.slot() orelse return null;
+        return if (index < all.slots.len) index else null;
     }
 
     /// The component it names, or null for the whole ship.
@@ -159,6 +166,7 @@ pub const State = extern union {
     scoop_up: tractor.State,
     disrupted: aiorders.DisruptedState,
     launch: launch.State,
+    jump: jump.State,
 
     comptime {
         assert(@sizeOf(State) == 0x90);
@@ -474,6 +482,8 @@ fn runInit(ctx: Context, index: u16, info: orders.Info) void {
         .fight => aifight.init(ctx, index),
         .disrupted => aiorders.disruptedInit(ctx, index),
         .launch => launch.init(ctx, index),
+        .jump_in, .jump_in_40 => jump.inInit(ctx, index),
+        .jump_out, .jump_out_41 => jump.outInit(ctx, index),
         else => {},
     }
 }
@@ -502,6 +512,8 @@ fn runUpdate(ctx: Context, index: u16, info: orders.Info) void {
         .launch_missile => aiorders.launchMissile(ctx, index),
         .unnamed_3 => aiorders.launchJackHammer(ctx, index),
         .launch => launch.update(ctx, index),
+        .jump_in, .jump_in_40 => jump.inUpdate(ctx, index),
+        .jump_out, .jump_out_41 => jump.outUpdate(ctx, index),
         else => {},
     }
 }

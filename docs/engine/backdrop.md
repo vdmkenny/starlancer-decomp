@@ -64,7 +64,9 @@ After a camera cut, `backdrop_reset_streaks` (`0x004A5C80`) stops the next frame
 
 ## Dust
 
-200 motes in a cube of side 8191, placed by the C runtime's `rand`, grey at half brightness. They are fixed in the world, repeating every 8192 units: each frame a mote is placed within 4096 of the camera on each axis. Its brightness is `16 * (0.25 - d² / 8191²) / (100m + 1)`, clamped to 0 to 1, with `d` its distance, so motes fade out by 4096 away. They streak like stars.
+200 motes in a cube of side 8191, placed by the C runtime's `rand`, grey at half brightness. They are fixed in the world, repeating every 8192 units: each frame a mote is placed within 4096 of the camera on each axis. Its brightness is `16 * (0.25 - d² / 8191²) / (100m + 1)`, clamped to 0 to 1, with `d` its distance, so motes fade out by 4096 away. They streak like stars,
+but while the player's ship jumps in (`0x005E82F0`, [Jumps](jump.md#jump-in)) their streaks are cut
+to a quarter as long, 0.025 view units (`0x004DC424`).
 
 ## Sun and lens flares
 

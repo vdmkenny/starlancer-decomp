@@ -899,8 +899,7 @@ pub const target_barred: GameObject.Flags = .{
 /// **Unverified:** it lies before this file's known code.
 pub fn targetValid(all: *const create.Objects, target: aigeneric.Target, allowed: GameObject.Flags) bool {
     // The game reads the index as a ship's slot, whatever the target's kind.
-    const index = target.slot() orelse return false;
-    if (index >= all.slots.len) return false;
+    const index = target.slotIn(all) orelse return false;
     const slot = &all.slots[index];
     const object = &slot.object;
     if (!object.flags.targetable) return false;
@@ -984,7 +983,7 @@ test "a ship steered at a point comes round to face it" {
     const before = off(slot, at);
     for (0..50) |_| {
         turn(slot, at, 1, 0, .{ .roll_upright = true }, 1, false);
-        motion.move(&slot.object, .{ .own = slot.flight.? }, .chase, .forward, null);
+        motion.move(&slot.object, .{ .own = slot.flight.? }, .chase, .forward, null, null);
         // What the next step commits, which the steering then reads.
         slot.object.root.position = slot.object.root.next_position;
         slot.object.root.orientation = slot.object.root.next_orientation;

@@ -364,6 +364,12 @@ pub const Backdrop = struct {
         };
     }
 
+    /// Has the dust's streaks cut shorter, or not (`srstars.Field.shortened`), as the player's
+    /// ship jumps in.
+    pub fn shortenDust(backdrop: *Backdrop, shortened: bool) void {
+        backdrop.dust.shortened = shortened;
+    }
+
     /// Makes every star field take this frame as its last, so a cut draws no streaks
     /// (`backdrop_reset_streaks`, `0x004A5C80`).
     pub fn resetStreaks(backdrop: *Backdrop) void {

@@ -385,6 +385,9 @@ pub const Type = enum(u32) {
     /// Escape pods again, of the same models as `escape_pod` and `other_escape_pod`.
     late_escape_pod = 0xDF,
     other_late_escape_pod = 0xE0,
+    /// A fuel pod (`fuel_pod1.shp`), which a jump that clears its way marks jumping wherever it is
+    /// (`jump.markJumping`).
+    fuel_pod = 0xE1,
     /// A second Phoenix (`t_uspf_phx.shp`), the last type of the table.
     t_phoenix = 0xFF,
     /// The markers `backdrop_place` reads a mission's sun and nebula from.
@@ -2008,7 +2011,7 @@ test "a knock pushes and turns an object" {
     // A push to the side on the nose: the object moves off to that side and turns its nose there.
     knock(&object, .{ 0.02, 0, 0 }, .{ 0, 0, 1 });
     try std.testing.expectEqual(1, object.knocks);
-    motion.move(&object, .{ .own = &testing.flight }, .chase, .forward, null);
+    motion.move(&object, .{ .own = &testing.flight }, .chase, .forward, null, null);
     try std.testing.expectEqual(0, object.knocks);
     // The knock replaces the motion routine, so the throttle adds nothing this update.
     try std.testing.expectEqual(math.Vector{ 0.005, 0, 0 }, vector(object.velocity));

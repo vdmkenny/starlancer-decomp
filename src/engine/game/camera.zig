@@ -73,6 +73,18 @@ pub const View = enum(u8) {
     /// The third: from beside and below the carrier, which the view shows whole, looking at the
     /// ship as it drops out.
     launch_aside = 0x22,
+    /// The player's Jump Out ([jumps](../../../docs/engine/jump.md)): from out along each of the
+    /// ship's axes where it began, watching it go.
+    jump_out = 0x27,
+    /// The first of three views the player's Jump In picks from at random: from close ahead of the
+    /// ship and above it, looking back at it as it flies in, pulling away a little and shaking as
+    /// hits shake the cockpit.
+    jump_in_close = 0x17,
+    /// The second: from far ahead, beyond where the ship arrives and below it, held, looking level
+    /// in the ship's frame at where it came in from.
+    jump_in_ahead = 0x18,
+    /// The third: from beside where the ship arrives and above it, watching it fly in.
+    jump_in_aside = 0x19,
     /// Around the player's target, looking at it, steered from the keyboard.
     target = 6,
     /// Around the player's ship, likewise.
@@ -434,6 +446,23 @@ pub const Camera = struct {
         return true;
     }
 
+    /// Switches to one of a jump's views, `view`, of `object`, locked and forced
+    /// (`camera_set_view`), placing the camera once where the view stands: Jump Out's view
+    /// `jump_out_reach` out from `seen`, the object, along each of its axes; the view ahead
+    /// `jump_ahead_offset` from it, looking at it level in the frame of `player`, the player's ship;
+    /// and the view aside `jump_aside_offset` from it. `frame` then moves it. The close view needs
+    /// no placing: `frame` places it from the player's ship every frame, as it does at the switch.
+    pub fn setJump(camera: *Camera, view: View, object: u16, now: u32, seen: Subject, player: Subject) bool {
+        if (!camera.setView(view, object, true, true, now)) return false;
+        switch (view) {
+            .jump_out => camera.place.position = seen.place().point(@splat(jump_out_reach)),
+            .jump_in_ahead => camera.place = levelLookingAt(seen.place().point(jump_ahead_offset), seen.position, player.orientation),
+            .jump_in_aside => camera.place.position = seen.place().point(jump_aside_offset),
+            else => {},
+        }
+        return true;
+    }
+
     /// Whether `object` is not drawn because the camera is in its cockpit: `camera_set_view` sets
     /// the object's flag bit 0 then.
     pub fn inside(camera: Camera, object: u16) bool {
@@ -579,6 +608,17 @@ pub const Camera = struct {
                 if (world.showing) |showing| showing.* = .everything;
                 camera.place = lookingAt(camera.place.position, world.player.position);
             },
+            .jump_out => camera.place = lookingAt(camera.place.position, world.object.position),
+            .jump_in_close => {
+                camera.place = lookingAt(world.player.place().point(jumpCloseOffset(camera.shown(world))), world.player.position);
+                // The camera shakes with a hit, as the cockpit's does.
+                if (shake > 0) camera.place.orientation = math.product(
+                    Cockpit.jitter(camera.hit_shake * Cockpit.camera_shake, world.random),
+                    camera.place.orientation,
+                );
+            },
+            .jump_in_ahead => {},
+            .jump_in_aside => camera.place = lookingAt(camera.place.position, world.player.position),
             .watch => camera.place = lookingAt(camera.place.position, world.object.position),
             .watch_marker => if (world.marker) |marker| {
                 camera.place = lookingAt(camera.place.position, marker);
@@ -1057,6 +1097,95 @@ const aside_offset: Vector = .{ -1700, 6000, 0 };
 /// **Improvement:** 54 degrees, which the game rounds to 0.942478.
 const bay_pitch: f32 = std.math.degreesToRadians(-54.0);
 const bay_tilt: f32 = 0.0007;
+
+// --- The jumps ----------------------------------------------------------------------------------
+
+/// How far out along each of its ship's axes Jump Out's view stands (`camera_set_view`,
+/// `0x0045FB18`).
+const jump_out_reach: f32 = 8000;
+
+/// Where the arrival's views stand from the player's ship as they are switched to, while it stands
+/// far behind where it arrives (`jump.arrival_distance`): the view ahead 300 below it and 27000
+/// ahead (`0x0045F8E7`), and the view aside 2000 to its left, 100 above it and 25000 ahead
+/// (`0x0045F91E`).
+const jump_ahead_offset: Vector = .{ 0, 300, 27000 };
+const jump_aside_offset: Vector = .{ -2000, -100, 25000 };
+
+/// The close view (`camera_frame`, `0x00460EC5`): 200 to the right of the player's ship and 500
+/// above it (`0x00460F1A`), and ahead of it by `jump_close_near` for its first `jump_close_hold`
+/// ticks, then by `jump_close_pull` a tick more until `jump_close_end`, and by `jump_close_far`
+/// from then on (`0x00460ED2`, `0x004DC48C`, `0x004DC520`, `0x004DC75C`, `0x00460F09`).
+const jump_close_side: f32 = 200;
+const jump_close_height: f32 = -500;
+const jump_close_near: f32 = 1200;
+const jump_close_hold: f32 = 50;
+const jump_close_pull: f32 = 10;
+const jump_close_end: f32 = 70;
+const jump_close_far: f32 = 1400;
+
+/// Where the close view stands from the player's ship, `since` ticks after it was switched to.
+fn jumpCloseOffset(since: f32) Vector {
+    const ahead = if (since < jump_close_hold)
+        jump_close_near
+    else if (since < jump_close_end)
+        (since - jump_close_hold) * jump_close_pull + jump_close_near
+    else
+        jump_close_far;
+    return .{ jump_close_side, jump_close_height, ahead };
+}
+
+/// Standing at `at` and looking at `target`, with no roll in the frame `upright` turns to
+/// (`camera_set_view`, `0x0045F956`): the look is taken between the two points turned back into
+/// that frame, and turned out of it again.
+fn levelLookingAt(at: Vector, target: Vector, upright: Matrix) Place {
+    return .{ .position = at, .orientation = math.product(upright, math.lookAt(math.transformTransposed(upright, target - at))) };
+}
+
+test "Jump Out's view watches its ship go" {
+    var camera: Camera = .{};
+    const turned = math.rotation(.y, 1);
+    const ship: Subject = .{ .position = .{ 100, 200, 300 }, .orientation = turned };
+    try std.testing.expect(camera.setJump(.jump_out, 3, 10, ship, ship));
+    try std.testing.expect(camera.locked);
+    try expectVector(ship.place().point(@splat(jump_out_reach)), camera.place.position);
+    // As the ship goes, the camera stays and turns after it.
+    const gone: Subject = .{ .position = .{ 100, 200, 50000 }, .orientation = turned };
+    _ = camera.frame(.{ .object = gone, .player = gone, .ticks = 1, .now = 20 });
+    try expectVector(ship.place().point(@splat(jump_out_reach)), camera.place.position);
+    try expectVector(math.normalize(gone.position - camera.place.position), math.forward(camera.place.orientation));
+}
+
+test "the arrival's views" {
+    const turned = math.product(math.rotation(.x, 0.5), math.rotation(.y, 1));
+    const ship: Subject = .{ .position = .{ 1000, -2000, 3000 }, .orientation = turned };
+
+    // Close: ahead of the ship, looking back at it, pulling away between 50 and 70 ticks in.
+    var close: Camera = .{};
+    try std.testing.expect(close.setJump(.jump_in_close, 0, 100, ship, ship));
+    for ([_]struct { u32, f32 }{ .{ 100, 1200 }, .{ 150, 1200 }, .{ 160, 1300 }, .{ 170, 1400 }, .{ 400, 1400 } }) |at| {
+        _ = close.frame(.{ .object = ship, .player = ship, .ticks = 1, .now = at[0] });
+        try expectVector(ship.place().point(.{ 200, -500, at[1] }), close.place.position);
+        try expectVector(math.normalize(ship.position - close.place.position), math.forward(close.place.orientation));
+    }
+
+    // Ahead: held where it was put, level in the ship's frame, looking at where the ship was.
+    var ahead: Camera = .{};
+    try std.testing.expect(ahead.setJump(.jump_in_ahead, 0, 100, ship, ship));
+    const held = ahead.place;
+    try expectVector(ship.place().point(jump_ahead_offset), held.position);
+    try expectVector(math.normalize(ship.position - held.position), math.forward(held.orientation));
+    try std.testing.expectApproxEqAbs(0, math.dot(math.xAxis(held.orientation), math.yAxis(turned)), 1e-5);
+    const moved: Subject = .{ .position = ship.place().point(.{ 0, 0, 25000 }), .orientation = turned };
+    _ = ahead.frame(.{ .object = moved, .player = moved, .ticks = 1, .now = 200 });
+    try std.testing.expectEqual(held, ahead.place);
+
+    // Aside: where it was put, watching the ship fly in.
+    var aside: Camera = .{};
+    try std.testing.expect(aside.setJump(.jump_in_aside, 0, 100, ship, ship));
+    _ = aside.frame(.{ .object = moved, .player = moved, .ticks = 1, .now = 200 });
+    try expectVector(ship.place().point(jump_aside_offset), aside.place.position);
+    try expectVector(math.normalize(moved.position - aside.place.position), math.forward(aside.place.orientation));
+}
 
 // --- The ejection -------------------------------------------------------------------------------
 

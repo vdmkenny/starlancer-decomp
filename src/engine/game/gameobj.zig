@@ -1924,7 +1924,8 @@ pub const testing = struct {
         .pitch_inertia = 0.8,
         .yaw_inertia = 0.8,
         .speed_per_pitch_rate = 160,
-        ._unknown_24 = 0,
+        .turns = .banking,
+        ._unknown_26 = 0,
     };
 
     /// An object as `create_object` leaves one: undamaged, at rest, facing along its own nose.

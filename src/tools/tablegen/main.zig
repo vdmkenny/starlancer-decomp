@@ -4,6 +4,7 @@
 //!     tablegen commands <LANCER.EXE> <output.zig>
 //!     tablegen conditions <LANCER.EXE> <output.zig>
 //!     tablegen models <LANCER.EXE> <disassembly.asm> <output.zig>
+//!     tablegen flight <LANCER.EXE> <output.zig>
 //!     tablegen combat <LANCER.EXE> <output.zig>
 //!     tablegen guns <LANCER.EXE> <output.zig>
 //!     tablegen sounds <LANCER.EXE> <output.zig>
@@ -25,6 +26,9 @@
 //!
 //! `models`: the model of each ship type, and the models mounted on attachment points, which the
 //! engine loads in code that the listing lets this follow.
+//!
+//! `flight`: the word of each ship type's flight stats that the executable holds: how the AI
+//! turns it.
 //!
 //! `combat`: the words of each ship type's combat stats that the executable holds: whether it can
 //! be targeted, its name, its class and its side.
@@ -64,6 +68,7 @@ const commands = @import("commands.zig");
 const conditions = @import("conditions.zig");
 const controls = @import("controls.zig");
 const eval = @import("eval.zig");
+const flight = @import("flight.zig");
 const gun_stats = @import("guns.zig");
 const sound_tables = @import("sounds.zig");
 const image = @import("image.zig");
@@ -95,6 +100,7 @@ const usage =
     \\       tablegen commands <LANCER.EXE> <output.zig>
     \\       tablegen conditions <LANCER.EXE> <output.zig>
     \\       tablegen models <LANCER.EXE> <disassembly.asm> <output.zig>
+    \\       tablegen flight <LANCER.EXE> <output.zig>
     \\       tablegen combat <LANCER.EXE> <output.zig>
     \\       tablegen guns <LANCER.EXE> <output.zig>
     \\       tablegen sounds <LANCER.EXE> <output.zig>
@@ -113,6 +119,7 @@ const Mode = union(enum) {
     commands: struct { binary: []const u8, output: []const u8 },
     conditions: struct { binary: []const u8, output: []const u8 },
     models: struct { binary: []const u8, listing: []const u8, output: []const u8 },
+    flight: struct { binary: []const u8, output: []const u8 },
     combat: struct { binary: []const u8, output: []const u8 },
     guns: struct { binary: []const u8, output: []const u8 },
     sounds: struct { binary: []const u8, output: []const u8 },
@@ -177,6 +184,7 @@ pub fn main(init: std.process.Init) !u8 {
         .commands => |paths| catalogue(init, arena, paths),
         .conditions => |paths| conditionCatalogue(init, arena, paths),
         .models => |paths| modelTables(init, arena, paths),
+        .flight => |paths| flightTable(init, arena, paths),
         .combat => |paths| combatTable(init, arena, paths),
         .guns => |paths| gunTable(init, arena, paths),
         .sounds => |paths| soundTables(init, arena, paths),
@@ -209,6 +217,13 @@ fn modelTables(init: std.process.Init, arena: std.mem.Allocator, paths: @FieldTy
     const tables = try models.read(arena, reader, try x86.parse(arena, try loadExport(init, arena, paths.listing)));
     try writeOutput(init, paths.output, models.emit, .{tables});
     std.debug.print("{d} ship types and the attachment models -> {s}\n", .{ tables.ship_types.len, paths.output });
+    return 0;
+}
+
+fn flightTable(init: std.process.Init, arena: std.mem.Allocator, paths: @FieldType(Mode, "flight")) !u8 {
+    const types = try flight.read(arena, try loadBinary(init, arena, paths.binary));
+    try writeOutput(init, paths.output, flight.emit, .{types});
+    std.debug.print("{d} ship types' turns -> {s}\n", .{ types.len, paths.output });
     return 0;
 }
 
@@ -424,6 +439,7 @@ test Mode {
     try std.testing.expectEqualStrings("disassembly.asm", models_mode.models.listing);
     const controls_mode = Mode.parse(&.{ "controls", "LANCER.EXE", "out.zig" }).?;
     try std.testing.expectEqualStrings("out.zig", Mode.parse(&.{ "combat", "LANCER.EXE", "out.zig" }).?.combat.output);
+    try std.testing.expectEqualStrings("out.zig", Mode.parse(&.{ "flight", "LANCER.EXE", "out.zig" }).?.flight.output);
     try std.testing.expectEqualStrings("LANCER.EXE", controls_mode.controls.binary);
     try std.testing.expectEqual(@as(?Mode, null), Mode.parse(&.{ "controls", "LANCER.EXE" }));
     try std.testing.expectEqualStrings("out.zig", Mode.parse(&.{ "views", "LANCER.EXE", "out.zig" }).?.views.output);
@@ -439,6 +455,7 @@ test {
     _ = conditions;
     _ = controls;
     _ = eval;
+    _ = flight;
     _ = image;
     _ = maneuvers;
     _ = models;

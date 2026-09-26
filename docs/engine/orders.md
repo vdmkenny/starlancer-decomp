@@ -155,6 +155,14 @@ than 10 ticks, turns of less than an eighth of a turn are halved first, along wi
 further off it rolls to bring the point overhead, and it pitches only once the roll is within 0.8
 radians of where it wants it. A ship flying backwards turns toward the other way about.
 
+`0x00401690` turns the ship flat: it pitches and yaws at the point together and never rolls, and
+with the point behind it, it yaws hard to the side the point lies on. No file sets the word: the
+executable's `ship_flight_stats` (`0x004F9E70`) holds it for each ship type, and `stats_load_ships`
+leaves it. The capital ships and most other types turn flat; the fighters bank, as do some
+support ships, the Nanny and the limpet car among them. The missiles' own flight stats
+(`missile_flight_stats`) turn every missile flat but the fuel pod.
+[`create/flight.zig`](../../src/engine/game/create/flight.zig) lists the types.
+
 | Flag | Meaning |
 |---|---|
 | `0x1` | First `avoid_near` (`0x004028F0`) moves the point around the objects with components in the ship's first avoidance list. |
@@ -341,10 +349,13 @@ orientation, in the frame the station's part is drawn at, and turned as the port
 
 The init (`0x00407010`) picks the first step by where the ship stands in the port's frame: more
 than 100000 behind the port, step 3 where it stands within a fifth of that to the side, and step 2
-further out; nearer, step 1 behind the port and step 0 ahead of it. Steps 0 to 4 steer for a point in the port's frame, mirrored
-across it for a ship that came from its right, at full throttle (`ai_steer`, no flags), rolling
-the ship to stand as the port stands (its roll input the roll between them less twice its roll
-rate, in degrees over 40, within 1), each on to the next within 2000 of its point:
+further out; nearer, step 1 behind the port and step 0 ahead of it. Steps 0 to 4 steer for a point
+in the port's frame, mirrored across it for a ship that came from its right, at full throttle
+(`ai_steer`, no flags), rolling the ship to stand as the port stands (its roll input the roll
+between them less twice its roll rate, in degrees over 40, within 1), each on to the next within
+2000 of its point. Holding the roll leaves the ship its pitch and yaw to come round with: a ship
+that turns flat, as capital ships do, flies the whole way round, while a banking one turns only
+while the point lies within 18 degrees of its nose or its tail.
 
 | Step | Point, in the port's frame |
 |---|---|

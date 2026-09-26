@@ -148,6 +148,15 @@ model-tables: ## Re-derive the ship type and attachment model tables from the pa
 	$(ROOT)/zig-out/bin/tablegen models $(PAYLOAD) $(PAYLOAD_DISASSEMBLY) $(MODEL_TABLES)
 	$(ZIG) fmt $(MODEL_TABLES)
 
+FLIGHT_TABLES := $(ROOT)/src/engine/game/create/flight.zig
+
+.PHONY: flight-tables
+flight-tables: ## Re-derive how the AI turns each ship type, banking or flat, from the payload executable
+	@test -f $(PAYLOAD) || { echo "missing $(PAYLOAD), the game executable with its code readable" >&2; exit 1; }
+	$(ZIG) build tablegen
+	$(ROOT)/zig-out/bin/tablegen flight $(PAYLOAD) $(FLIGHT_TABLES)
+	$(ZIG) fmt $(FLIGHT_TABLES)
+
 COMBAT_TABLES := $(ROOT)/src/engine/game/create/combat.zig
 
 .PHONY: combat-tables

@@ -638,8 +638,9 @@ pub fn steer(world: gameobj.World, index: u16, at: Vector, limit: f32, ease: f32
     return avoided;
 }
 
-/// The rest of `ai_steer`: the turning inputs that aim the ship at `at`, the angles off its nose,
-/// less `(1 - ease) * 6` times each turn rate, as shares of five degrees, each held within
+/// The rest of `ai_steer`: the turning inputs that aim the ship at `at`, banking or flat as its
+/// flight stats have it (`create.FlightModel.Turns`): the angles off its nose, less
+/// `(1 - ease) * 6` times each turn rate, as shares of five degrees, each held within
 /// `limit` and 1. `ease` slackens the damping, so an eased turn swings further. Where `avoided`,
 /// at full limit, with no ease and no pitch held up, and no roll upright.
 ///
@@ -664,10 +665,9 @@ pub fn turn(slot: *create.Slot, at: Vector, limit_given: f32, ease_given: f32, f
 
     object.holdTurns();
     const direction = slot.drawn.inverse(at);
-    if (@as(u16, @truncate(flight._unknown_24)) == 0) {
-        steerAngles(object, direction, slot.motion == .backward, flags);
-    } else {
-        steerAxes(object, direction);
+    switch (flight.turns) {
+        .banking => steerAngles(object, direction, slot.motion == .backward, flags),
+        .flat, _ => steerAxes(object, direction),
     }
 
     // A slow frame turns the ship further than a quick one, so the small turns are halved.
@@ -928,9 +928,9 @@ fn steerAngles(object: *GameObject, direction: Vector, backward: bool, flags: St
     if (@abs(object.roll_input) < roll_before_pitch) object.pitch_input = -std.math.atan2(toward[1], toward[2]);
 }
 
-/// `0x00401690`: the turns for a ship whose flight stats hold a word at `+0x24`, which pitches and
-/// yaws at the point together and never rolls. With the point behind it, it yaws hard to the side
-/// the point lies on. Nothing in the shipped game's ship stats sets that word.
+/// `0x00401690`: the turns for a ship that turns flat (`create.FlightModel.Turns`), which pitches
+/// and yaws at the point together and never rolls, whichever way it flies. With the point behind
+/// it, it yaws hard to the side the point lies on.
 fn steerAxes(object: *GameObject, direction: Vector) void {
     if (direction[2] >= 0) {
         object.pitch_input = -std.math.atan2(direction[1], direction[2]);
@@ -1084,6 +1084,29 @@ test steer {
     slot.object.pitch_rate = 1;
     turn(slot, .{ 0, -4000, 1000 }, 1, 0, .{ .pitch_up = true }, 1, false);
     try std.testing.expectEqual(pitch_floor, slot.object.pitch_input);
+}
+
+test "a ship that turns flat pitches and yaws at once, and never rolls" {
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(std.testing.allocator);
+    defer mission.deinit();
+    const index = try mission.add(.predator, @splat(0));
+    const slot = &mission.objects.slots[index];
+    var flat = slot.flight.?.*;
+    flat.turns = .flat;
+    slot.flight = &flat;
+
+    // Well off to the side and above, where a banking ship rolls first, it yaws and pitches up.
+    turn(slot, .{ 4000, 1000, 4000 }, 1, 0, .{}, 1, false);
+    try std.testing.expectEqual(1, slot.object.yaw_input);
+    try std.testing.expectEqual(-1, slot.object.pitch_input);
+    try std.testing.expectEqual(0, slot.object.roll_input);
+
+    // Behind it, it yaws hard to the side the point lies on.
+    turn(slot, .{ -100, 2000, -4000 }, 1, 0, .{}, 1, false);
+    try std.testing.expectEqual(-1, slot.object.yaw_input);
+    try std.testing.expectEqual(0, slot.object.pitch_input);
+    try std.testing.expectEqual(0, slot.object.roll_input);
 }
 
 test "a ship steered at a point comes round to face it" {

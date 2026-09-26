@@ -35,7 +35,9 @@ past its table's last field**, and in the shipped files those bytes are zero in 
 Ships and missiles share one runtime layout for how they fly: a live object points at its flight
 model at `+0x14` whichever it is. The flight model holds the max speed, the roll, pitch and yaw
 rates, the four inertias, and the max speed divided by the pitch rate, which the ship loader
-computes after reading the file. A missile's has only its speed and rates. The runtime layouts, with
+computes after reading the file. A missile's has only its speed and rates. The word at `+0x24`
+comes from no file: the executable holds it for each ship type and missile, and it says how the AI
+turns the ship ([Steering](../engine/orders.md#steering)). The runtime layouts, with
 the source of every field, are in the modules of the files that load them:
 [`create.zig`](../../src/engine/game/create.zig), [`guns.zig`](../../src/engine/game/guns.zig),
 [`missiles.zig`](../../src/engine/game/missiles.zig) and

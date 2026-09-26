@@ -190,7 +190,8 @@ pub const Table = struct {
             .pitch_inertia = 0.71,
             .yaw_inertia = 0.71,
             .speed_per_pitch_rate = 0,
-            ._unknown_24 = 1,
+            .turns = .flat,
+            ._unknown_26 = 0,
         };
     }
 

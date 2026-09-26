@@ -3,10 +3,11 @@
 //! `objects_reset` (`0x00466630`) fills every slot with a stand-in as a mission starts.
 //! `stats_load_ships` (`0x00466500`) fills `ship_flight_stats` and `ship_combat_stats` from
 //! `shipstats.bin`, [`formats/stats.zig`](../../formats/stats.zig).
-//! [`create/models.zig`](create/models.zig) names each ship type's and attachment's models, and
-//! [`create/combat.zig`](create/combat.zig) holds the combat stats' words that the executable
-//! keeps, and [`create/library.zig`](create/library.zig) reads the models the types and their
-//! attachment points use. **Unverified:** the loader, `objects_reset`, `ship_type_load` and the
+//! [`create/models.zig`](create/models.zig) names each ship type's and attachment's models,
+//! [`create/flight.zig`](create/flight.zig) and [`create/combat.zig`](create/combat.zig) hold the
+//! flight and combat stats' words that the executable keeps, and
+//! [`create/library.zig`](create/library.zig) reads the models the types and their attachment
+//! points use. **Unverified:** the loader, `objects_reset`, `ship_type_load` and the
 //! ship type table lie between `collision.cpp`'s code and data and this file's, and `object_reset`
 //! and `objects_update` after this file's known code, before `environfx.cpp`'s.
 
@@ -43,6 +44,7 @@ const srofiles = @import("srofiles.zig");
 const xtrabits = @import("xtrabits.zig");
 
 pub const models = @import("create/models.zig");
+pub const flight_stats = @import("create/flight.zig");
 pub const combat_stats = @import("create/combat.zig");
 pub const library = @import("create/library.zig");
 
@@ -50,19 +52,20 @@ pub const library = @import("create/library.zig");
 /// above the last, markers and nav points among them, have no stats.
 pub const ship_type_count = 256;
 
-/// `ship_flight_stats` and `ship_combat_stats` (`0x004FC670`): each ship type's flight model and
-/// combat stats, which `create_object` points each object of the type at.
+/// `ship_flight_stats` (`0x004F9E70`) and `ship_combat_stats` (`0x004FC670`): each ship type's
+/// flight model and combat stats, which `create_object` points each object of the type at.
 pub const Stats = struct {
     flight: [ship_type_count]FlightModel,
     combat: [ship_type_count]ShipCombat,
 
     /// The tables as the executable holds them before `stats_load_ships` runs: every figure zero,
-    /// and each combat record's own words.
+    /// and each record's own words, how the AI turns the type and what its combat record says it is.
     pub const initial: Stats = built: {
         var tables: Stats = .{
             .flight = @splat(std.mem.zeroes(FlightModel)),
             .combat = @splat(std.mem.zeroes(ShipCombat)),
         };
+        for (&tables.flight, 0..) |*flight, ship_type| flight.turns = flight_stats.turns(ship_type);
         for (&tables.combat, combat_stats.ship_types) |*record, static| {
             record.targeting = .{ .targetable = static.targetable };
             record.name = static.name;
@@ -75,7 +78,7 @@ pub const Stats = struct {
 
     /// `stats_load_ships` (`0x00466500`): each record of `shipstats.bin` in turn fills in its
     /// type's figures, up to the last type, and then every type's `speed_per_pitch_rate` is worked
-    /// out. The combat stats keep in whole numbers what the runtime's `__ftol` cuts the record's
+    /// out. How each type turns stays as the executable has it. The combat stats keep in whole numbers what the runtime's `__ftol` cuts the record's
     /// figures down to, and a `shield_recharge` of zero becomes
     /// `stats.Ship.default_shield_recharge`.
     pub fn load(tables: *Stats, ships: []align(1) const stats.Ship) void {
@@ -147,11 +150,26 @@ pub const FlightModel = extern struct {
     yaw_inertia: f32,
     /// `max_speed / pitch_rate`, which the ship loader computes after reading the file.
     speed_per_pitch_rate: f32,
-    _unknown_24: u32,
+    /// How the AI turns it (`ai_steer`). No file sets it: the executable holds it for each ship
+    /// type ([`create/flight.zig`](create/flight.zig)) and each missile, and the loaders leave it.
+    turns: Turns,
+    _unknown_26: u16,
+
+    /// How the AI turns a ship at a point, a word the game tests for zero.
+    pub const Turns = enum(u16) {
+        /// Rolling the point overhead, then pitching up at it (`0x00401710`): the fighters, and
+        /// some support ships, the Nanny and the limpet car among them.
+        banking = 0,
+        /// Pitching and yawing at it together, never rolling (`0x00401690`): the capital ships,
+        /// most other types that are not fighters, and every missile but the fuel pod.
+        flat = 1,
+        _,
+    };
 
     comptime {
         assert(@offsetOf(FlightModel, "inertia") == 0x10);
         assert(@offsetOf(FlightModel, "speed_per_pitch_rate") == 0x20);
+        assert(@offsetOf(FlightModel, "turns") == 0x24);
         assert(@sizeOf(FlightModel) == 0x28);
     }
 };
@@ -1717,6 +1735,9 @@ test "the tables hold the executable's words until the file fills in the figures
     try std.testing.expectEqual(.fighter, initial.combat[0x2B].class);
     try std.testing.expectEqual(.hostile, initial.combat[0x2B].side);
     try std.testing.expectEqual(0, initial.combat[0x2B].shield_power);
+    // The capital ships turn flat, and the fighters bank.
+    try std.testing.expectEqual(.flat, initial.flight[0x0C].turns);
+    try std.testing.expectEqual(.banking, initial.flight[0x2B].turns);
 
     var ship = std.mem.zeroes(stats.Ship);
     ship.max_speed = 320;
@@ -1729,6 +1750,7 @@ test "the tables hold the executable's words until the file fills in the figures
     try std.testing.expectEqual(160, tables.flight[0].speed_per_pitch_rate);
     // The file's figures leave the executable's words alone.
     try std.testing.expectEqual(initial.combat[0].name, tables.combat[0].name);
+    try std.testing.expectEqual(initial.flight[0].turns, tables.flight[0].turns);
 }
 
 test {

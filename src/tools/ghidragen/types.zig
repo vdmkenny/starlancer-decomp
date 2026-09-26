@@ -72,6 +72,7 @@ pub const exported = [_]Export{
 
     // Stat tables.
     .{ "FlightModel", engine.game.create.FlightModel },
+    .{ "FlightTurns", engine.game.create.FlightModel.Turns },
     .{ "ShipCombat", engine.game.create.ShipCombat },
     .{ "ShipTargeting", engine.game.create.ShipCombat.Targeting },
     .{ "ShipClass", engine.game.create.ShipCombat.Class },

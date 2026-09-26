@@ -62,7 +62,6 @@ test followActivation {
     var app: App = .{};
     var clock: Clock = .{};
     var view: camera.Camera = .{};
-    const setting: camera.CockpitSetting = .cockpit;
     const player: u16 = 0;
     var menu: hudoptions.PauseMenu = .{};
     defer menu.close();
@@ -72,7 +71,6 @@ test followActivation {
         .sound = &sound,
         .menu = &menu,
         .archive = archive.hog,
-        .view_setting = &setting,
         .camera = &view,
         .player = &player,
     };

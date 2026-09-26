@@ -275,8 +275,17 @@ pub const Type = enum(u32) {
     /// The Phoenix (`uspf_phx.shp`), which carries the Nova Cannon.
     phoenix = 0x0B,
     reliant = 0x0C,
-    /// The Victorious (`victorious.shp`).
+    /// The Yamato (`yamato.shp`), the carrier that takes the place of the ship the player launched
+    /// from once that ship explodes.
+    yamato = 0x0D,
+    /// The Victorious (`victorious.shp`), and the carriers after it whose ships launch from a bay
+    /// as its do: the Endeavour, the Mitchell and the Bremen.
     victorious = 0x11,
+    endeavour = 0x12,
+    mitchell = 0x13,
+    bremen = 0x14,
+    /// The Ulysses (`ulysses.shp`), whose escape pods launch even as it is lost.
+    ulysses = 0x16,
     /// The Nanny (`nanny.shp`).
     nanny = 0x18,
     /// The limpet car (`limpet_t_car.shp`).
@@ -284,11 +293,17 @@ pub const Type = enum(u32) {
     /// The Prowler (`us_prowler.shp`).
     prowler = 0x1E,
     ripper = 0x1F,
+    /// The Stork (`stork.shp`).
+    stork = 0x25,
     sabre = 0x2B,
     kamov = 0x2D,
     scimitar = 0x30,
+    /// The Ramases (`ramases.shp`).
+    ramases = 0x34,
     /// The Badanov (`cs_badanov.shp`), the smallest of the Coalition's capital ships.
     badanov = 0x37,
+    /// The Pukov (`pukov.shp`).
+    pukov = 0x38,
     /// The Kurgan (`rus_kurgan.shp`).
     kurgan = 0x3C,
     /// The Gurevich (`rmc_gurevich.shp`).
@@ -330,6 +345,8 @@ pub const Type = enum(u32) {
     badanov_wreck_back = 0x75,
     badanov_wreck_front = 0x76,
     kurgan_wreck = 0x77,
+    /// The Krasnaya (`krasnaya.shp`).
+    krasnaya = 0x78,
     /// The Latov (`latov.shp`).
     latov = 0x81,
     /// The Czar, docked (`czar_docked.shp`).
@@ -338,16 +355,31 @@ pub const Type = enum(u32) {
     dm_beacon = 0x8E,
     /// The Kafelnikof (`kafelnikof.shp`).
     kafelnikof = 0x95,
+    /// The Krasny (`krasny.shp`), whose ships launch as the Badanov's do.
+    krasny = 0x9A,
+    /// The Varyag (`varyag.shp`), and a second Ramases and Mitchell, of the same models.
+    varyag = 0x9B,
+    other_ramases = 0x9C,
+    other_mitchell = 0xA0,
+    /// The rogue base (`rogue_base.shp`).
+    rogue_base = 0xA5,
     /// The part of the Boridin that breaks away (`boridin breakaway.shp`).
     boridin_breakaway = 0xA8,
     /// Another escape pod (`ber_escape.shp`).
     other_escape_pod = 0x90,
+    /// The Zakov (`zakov.shp`).
+    zakov = 0xB0,
     /// The Turret Flak's shell (`shell.shp`).
     shell = 0xB1,
     /// The first of five chunks of rock (`rockchunk00.SHP` to `rockchunk04.SHP`).
     rock_chunk = 0xB2,
     /// The limpet pod, which rides on a hull.
     limpet_pod = 0xBC,
+    /// The Kiev (`kiev.shp`).
+    kiev = 0xC2,
+    /// The Reliant's hangar (`reliant_hang.shp`): the cutaway the Reliant's launch shows the
+    /// player's ship in.
+    reliant_hangar = 0xD6,
     /// A comms relay (`comms relay.shp`).
     comms_relay = 0xD7,
     /// Escape pods again, of the same models as `escape_pod` and `other_escape_pod`.
@@ -1425,8 +1457,14 @@ pub const World = struct {
     /// The guns' pools, a flak shell's burst's and the spent cases'; null where none are sent out.
     gun_particles: ?*@import("guns.zig").effects.Pools = null,
     /// What objects are made from while the mission runs, as a capital ship's split makes its
-    /// other half (`create_object`); null where none are made.
+    /// other half (`create_object`), and the ship types' flight models, which the plain motions fly
+    /// fighters by (`motion.Flight`); null where none are made.
     spawn: ?Spawn = null,
+    /// The mission's records, through which an order aimed at a flight group or a squad reaches
+    /// their ships (`ai.eachShip`); null where no mission is bound, as in a test.
+    mission: ?*const @import("mission/bind.zig").Mission = null,
+    /// What the mission's script asks of its space (`environfx.cpp`); null where nothing is drawn.
+    environment: ?*@import("environfx.zig").Environment = null,
 
     /// The ship types' stats and their models.
     pub const Spawn = struct {
@@ -1967,7 +2005,7 @@ test "a knock pushes and turns an object" {
     // A push to the side on the nose: the object moves off to that side and turns its nose there.
     knock(&object, .{ 0.02, 0, 0 }, .{ 0, 0, 1 });
     try std.testing.expectEqual(1, object.knocks);
-    motion.move(&object, &testing.flight, .chase, .forward, null);
+    motion.move(&object, .{ .own = &testing.flight }, .chase, .forward, null);
     try std.testing.expectEqual(0, object.knocks);
     // The knock replaces the motion routine, so the throttle adds nothing this update.
     try std.testing.expectEqual(math.Vector{ 0.005, 0, 0 }, vector(object.velocity));

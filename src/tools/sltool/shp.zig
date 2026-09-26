@@ -193,6 +193,7 @@ fn info(ctx: Context, model: shp.Model) !void {
                     .pod => "pod",
                     .eject_point => "eject point",
                     .case_ejector => "case ejector",
+                    .launch_point => "launch point",
                     _ => "kind",
                 },
                 @intFromEnum(attachment.kind),

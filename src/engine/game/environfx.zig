@@ -21,6 +21,39 @@ const gameobj = @import("gameobj.zig");
 const matmanager = @import("matmanager.zig");
 const objects = @import("objects.zig");
 const Vector = math.Vector;
+const backdrop = @import("backdrop.zig");
+const nebula = @import("nebula.zig");
+const log = std.log.scoped(.environfx);
+
+/// What a mission's script asks of the space it is flown in, which `environment_update`
+/// (`0x00469D30`) applies: the nebula it asks for, shown on the sky, whose fill lights take the
+/// nebula's colour (`nebula.Sky.select`).
+///
+/// Not ported: the rest of `environment_update`, the objects' flag `0x400` it sets and clears as
+/// asked, and the environment effects it turns on and off, which commands of other missions ask
+/// for (`DisableObjectAtNextJump`, `SetEnvironmentFX`,
+/// [#281](https://github.com/vdmkenny/openreliant/issues/281)).
+pub const Environment = struct {
+    sky: *nebula.Sky,
+    textures: *srtexture.Table,
+    lights: *backdrop.Lights,
+    /// `nebula_requested` (`0x0058A6B8`): the nebula `SetEnvironmentFXNebula` asks for, the
+    /// first until one does. A mission's start leaves it as the one before asked.
+    requested: u32 = nebula.default_nebula,
+
+    /// `environment_update` (`0x00469D30`), as a fixed gate's jump ends or the script asks
+    /// (`UpdateEnvironmentFXState`): the nebula asked for shows where the sky shows another
+    /// (`nebula_select`, `0x00498D00`).
+    ///
+    /// **Fix:** the game stops with the assertion "Error in script: Invalid nebula" for a nebula
+    /// past the seventh; OpenReliant logs it, and keeps the nebula it shows.
+    pub fn update(environment: *Environment) void {
+        if (environment.sky.nebula == environment.requested) return;
+        environment.sky.select(environment.textures, environment.requested, environment.lights) catch |err| {
+            log.warn("nebula {d} is left out: {s}", .{ environment.requested, @errorName(err) });
+        };
+    }
+};
 
 /// How many engine glows the game builds. An attachment's id picks one, clamped to these
 /// (`engine_glow_create`, `0x004697D0`).

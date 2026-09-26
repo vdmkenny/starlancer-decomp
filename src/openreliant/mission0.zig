@@ -2,16 +2,21 @@
 //! `mission0.dte` (`write`) and `openreliant` plays where no other mission is chosen. It holds only
 //! what the game's own missions hold, laid out as they are, so that the original plays it too.
 //!
-//! Its scene: the player's ship at the origin, facing along Z, and three wingmen, a Grendel, a
-//! Wolverine and a Reaper, listed in the player's wing. Ahead, the Reliant, turned across the
-//! player's way and flying it at a tenth of its speed; beyond it a wing of four Sabres facing the
-//! player; beyond them the Badanov, the smallest of the Coalition's capital ships, turned and flying
-//! as the Reliant does; and past the Badanov, outside the action's sphere, a field of twelve rocks,
-//! the seven asteroids in turn, placed and turned from a fixed seed. Its script's start part makes
-//! every flight group, has the Sabres fight the player and each wingman a Sabre, the rocks tumble
-//! slowly (Random Spin Slow), and an ejected pilot fare each way as likely. The Sabres' pilot is
-//! record 42 of `pilotstats.bin`, one of its weakest, where the game gives a Sabre the sharp pilot
-//! of record 66, so the player's missiles mostly get past their countermeasures.
+//! Its scene: the Reliant at the origin, facing along Z, from whose first four tubes the player's
+//! ship and three wingmen, a Grendel, a Wolverine and a Reaper, listed in the player's wing, launch.
+//! Ahead, a wing of four Sabres facing the Reliant; beyond them the Badanov, the smallest of the
+//! Coalition's capital ships, turned across the way; and past the Badanov, outside the action's
+//! sphere, a field of twelve rocks, the seven asteroids in turn, placed and turned from a fixed
+//! seed.
+//!
+//! Its script's start part makes the Reliant's flight group, then every other, so that the wing
+//! finds the Reliant to launch from as it is made, has an ejected pilot fare each way as likely and
+//! the rocks tumble slowly (Random Spin Slow), and plays the launch's music. It starts the wing's
+//! launch and waits until the wing is out (`WaitForJumpOrLaunch`), as mission 1 does. Then the
+//! Reliant and the Badanov fly on at a tenth of their speed, the Sabres fight the player and each
+//! wingman a Sabre, and the mission's music follows the launch's. The Sabres' pilot is record 42 of
+//! `pilotstats.bin`, one of its weakest, where the game gives a Sabre the sharp pilot of record 66,
+//! so the player's missiles mostly get past their countermeasures.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -56,7 +61,8 @@ const Group = enum(u8) {
 };
 
 /// A ship the mission places: its name, its kind, its flight group, its pilot, where it stands and
-/// how it is turned, in whole degrees.
+/// how it is turned, in whole degrees, and the Reliant's tube it launches through, where it
+/// launches.
 const Placed = struct {
     name: []const u8,
     kind: Type,
@@ -66,12 +72,18 @@ const Placed = struct {
     yaw: i16 = 0,
     pitch: i16 = 0,
     roll: i16 = 0,
+    gate: ?u8 = null,
 };
 
-/// The Reliant's and the Badanov's heading: across the player's way.
-const crawl_yaw = 63;
-/// The speed they fly at: a tenth of the 100 the Reliant's type cruises at.
+/// The Badanov's heading: across the wing's way.
+const across_yaw = 63;
+/// The speed the capital ships fly at once the wing is out: a tenth of the 100 the Reliant's type
+/// cruises at.
 const crawl_speed = 10;
+
+/// The music the launch plays to, and the mission's after it, from the game's music folder.
+const launch_music = "new_launch.wav";
+const mission_music = "New_Mission01.wav";
 
 /// The Sabres: `wing_size` of them, `wing_ahead` in front of the player and `wing_spacing` apart,
 /// turned to face the player, flown by `wing_pilot`.
@@ -94,14 +106,15 @@ const field_step = 3;
 const field_seed = 0x5A4D;
 const field_size = field_rows * field_columns;
 
-/// The ships before the rocks: the player's ship first, whose slot is the player's.
+/// The ships before the rocks: the player's ship first, whose slot is the player's. The wing is
+/// placed at the Reliant, whose tubes the launch puts it in.
 const ships = [_]Placed{
-    .{ .name = "Player", .kind = .predator, .group = .alpha, .at = .{ 0, 0, 0 } },
-    .{ .name = "(A2)Grendel", .kind = .grendel, .group = .alpha, .at = .{ -4000, 0, -3000 } },
-    .{ .name = "(A3)Wolverine", .kind = .wolverine, .group = .alpha, .at = .{ 4000, 0, -3000 } },
-    .{ .name = "(A4)Reaper", .kind = .reaper, .group = .alpha, .at = .{ 0, 1500, -6000 } },
-    .{ .name = "The Reliant", .kind = .reliant, .group = .reliant, .at = .{ 6000, -9000, 48000 }, .yaw = crawl_yaw },
-    .{ .name = "The Badanov", .kind = .badanov, .group = .badanov, .at = .{ 6000, -9000, 190000 }, .yaw = crawl_yaw },
+    .{ .name = "Player", .kind = .predator, .group = .alpha, .at = @splat(0), .gate = 0 },
+    .{ .name = "(A2)Grendel", .kind = .grendel, .group = .alpha, .at = @splat(0), .gate = 1 },
+    .{ .name = "(A3)Wolverine", .kind = .wolverine, .group = .alpha, .at = @splat(0), .gate = 2 },
+    .{ .name = "(A4)Reaper", .kind = .reaper, .group = .alpha, .at = @splat(0), .gate = 3 },
+    .{ .name = "The Reliant", .kind = .reliant, .group = .reliant, .at = @splat(0) },
+    .{ .name = "The Badanov", .kind = .badanov, .group = .badanov, .at = .{ 6000, -9000, 190000 }, .yaw = across_yaw },
 } ++ sabres;
 
 const sabres = sabres: {
@@ -233,8 +246,8 @@ const group_tail = 0xFF19FFFF;
 const ship_tail = [_]u8{ 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
 
 /// Ship `ship`'s record, as the game's missions have their ships': object ID `id`, named at
-/// `name_at`, launching from none and in no formation, every component intact, standing where it
-/// is placed.
+/// `name_at`, launching through its tube of the first Reliant, or from none, in no formation, every
+/// component intact, standing where it is placed.
 fn shipRecord(ship: Placed, id: u32, name_at: u16) dte.Ship {
     var record = std.mem.zeroes(dte.Ship);
     record.object_id = id;
@@ -244,9 +257,9 @@ fn shipRecord(ship: Placed, id: u32, name_at: u16) dte.Ship {
     record.flight_group = @intFromEnum(ship.group);
     record.pilot = ship.pilot;
     record.kind = @intCast(ship.kind.number());
-    record.launch_from = std.math.maxInt(u16);
+    record.launch_from = if (ship.gate != null) @intCast(Type.reliant.number()) else std.math.maxInt(u16);
     record._unknown_2a = 0xFF;
-    record.launch_gate = dte.Ship.no_launch;
+    record.launch_gate = ship.gate orelse dte.Ship.no_launch;
     record.runtime_yaw = ship.yaw;
     record.yaw = ship.yaw;
     record.intact_components = std.math.maxInt(u32);
@@ -269,18 +282,32 @@ fn addString(gpa: Allocator, strings: *std.ArrayList(u8), text: []const u8) !u16
     return at;
 }
 
-/// The start part: every flight group made, the ejected pilot's odds each as likely, the capital
-/// ships flying at a crawl, the Sabres fighting the player, each wingman a Sabre, and the rocks
-/// tumbling.
+/// The order the start part makes the flight groups in: the Reliant's first, which the wing
+/// launches from as it is made.
+const made = [_]Group{ .reliant, .alpha, .badanov, .sabres, .rocks };
+
+comptime {
+    for (std.enums.values(Group)) |group| std.debug.assert(std.mem.indexOfScalar(Group, &made, group) != null);
+}
+
+/// The start part: every flight group made, the ejected pilot's odds each as likely, the rocks
+/// tumbling, the launch's music, and the wing's launch. Once the wing is out, the capital ships fly
+/// at a crawl, the Sabres fight the player and each wingman a Sabre, and the mission's music plays.
 fn script(gpa: Allocator) ![]u8 {
     var routine: Routine = .init(gpa);
     defer routine.deinit();
-    for (std.enums.values(Group)) |group| {
+    for (made) |group| {
         try routine.op(.push_flight_group, &.{@intFromEnum(group)});
         try routine.command("CreateFlightGroup");
     }
     for ([_]u8{ 33, 33, 34 }) |odds| try routine.pushConstant(odds);
     try routine.command("SetRescueProbabilities");
+    try setAI(&routine, .{ .group = .rocks }, .random_spin_slow, null);
+    try playMusic(&routine, launch_music);
+    try routine.op(.push_flight_group, &.{@intFromEnum(Group.alpha)});
+    try routine.command("StartLaunch");
+    try routine.op(.push_flight_group, &.{@intFromEnum(Group.alpha)});
+    try routine.command("WaitForJumpOrLaunch");
     for ([_]Group{ .reliant, .badanov }) |group| {
         try routine.op(.push_flight_group, &.{@intFromEnum(group)});
         try routine.op(.push_null, &.{});
@@ -289,10 +316,17 @@ fn script(gpa: Allocator) ![]u8 {
     }
     try setAI(&routine, .{ .group = .sabres }, .fight, player);
     for (wingmen, 0..) |wingman, n| try setAI(&routine, .{ .ship = wingman }, .fight, first_sabre + n % wing_size);
-    try setAI(&routine, .{ .group = .rocks }, .random_spin_slow, null);
+    try playMusic(&routine, mission_music);
     try routine.op(.push_byte, &.{1});
     try routine.op(.@"return", &.{});
     return routine.finish();
+}
+
+/// `PlayMusic` of the piece `piece`, once the music playing has faded out.
+fn playMusic(routine: *Routine, piece: []const u8) !void {
+    try routine.pushString(piece);
+    try routine.pushConstant(0);
+    try routine.command("PlayMusic");
 }
 
 /// What a command names: a ship or a flight group.
@@ -356,6 +390,34 @@ test write {
     try std.testing.expect(!disassembly.incomplete);
     // The command flags as the template's missions have them.
     try std.testing.expectEqualSlices(u8, std.mem.sliceAsBytes(&dte.write.template.command_flags), std.mem.sliceAsBytes(try mission.file.records(u16, .command_flags)));
+    // The wing launches through the Reliant's first four tubes; the rest launch from nothing.
+    for (records[0..4], 0..) |record, gate| {
+        try std.testing.expectEqual(gate, record.launchGate().?);
+        try std.testing.expectEqual(Type.reliant.number(), record.launch_from);
+    }
+    try std.testing.expectEqual(null, records[4].launchGate());
+}
+
+test "the wing waits in the Reliant's tubes as the mission starts, its launch started" {
+    const gpa = std.testing.allocator;
+    var world: game.gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    var orders = world.orders();
+    orders.world.spawn = .{ .tables = &world.tables, .types = game.create.testing.no_models };
+    const loaded = try game.mission.Loaded.create(gpa, try write(gpa), &world.random);
+    defer loaded.destroy();
+    orders.world.mission = &loaded.bound;
+    try loaded.start(orders);
+    const reliant: u16 = 4;
+    for (world.objects.slots[0..4]) |*slot| {
+        const entry = slot.current().?;
+        try std.testing.expectEqual(Order.launch, entry.order);
+        try std.testing.expectEqual(reliant, entry.target.slot().?);
+        try std.testing.expect(entry.data.launch.go);
+    }
+    // The capital ships wait with the script for the wing to be out.
+    try std.testing.expectEqual(Order.do_nothing, world.objects.slots[reliant].current().?.order);
 }
 
 test "the Reliant flies at a crawl" {
@@ -367,7 +429,7 @@ test "the Reliant flies at a crawl" {
     flight.max_speed = cruise;
     var object = game.gameobj.testing.object();
     object.throttle = @as(f32, crawl_speed) / cruise;
-    for (0..200) |_| game.motion.Motion.forward.run(&object, &flight, .chase);
+    for (0..200) |_| game.motion.Motion.forward.run(&object, .{ .own = &flight }, .chase);
     const velocity = game.gameobj.vector(object.velocity);
     try std.testing.expectApproxEqAbs(crawl_speed, @sqrt(@reduce(.Add, velocity * velocity)), 0.01);
 }

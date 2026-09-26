@@ -13,6 +13,8 @@ const vm = @import("../vm.zig");
 const aigeneric = @import("aigeneric.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
+const hud = @import("hud.zig");
+const launch = @import("launch.zig");
 const mission = @import("mission.zig");
 const objects = @import("objects.zig");
 const pilots = @import("pilots.zig");
@@ -37,6 +39,7 @@ pub fn implementation(number: u8) ?vm.Implementation {
 }
 
 const implementations = table: {
+    @setEvalBranchQuota(10_000);
     var table: [commands.table.len]?vm.Implementation = @splat(null);
     for ([_]struct { []const u8, vm.Implementation }{
         .{ "CreateTimer", vm.Machine.createTimer },
@@ -48,6 +51,21 @@ const implementations = table: {
         .{ "Fly", fly },
         .{ "SetRescueProbabilities", setRescueProbabilities },
         .{ "KillAllScriptExecutionExecptMe", vm.Machine.killAllScriptExecutionExceptMe },
+        .{ "WaitForMovie", waitForMovie },
+        .{ "SetupLaunch", setupLaunch },
+        .{ "StartLaunch", startLaunch },
+        .{ "SetInvulnerability", setInvulnerability },
+        .{ "PlayMusic", playMusic },
+        .{ "DisableTaunts", disableTaunts },
+        .{ "DisableGenericComms", disableGenericComms },
+        .{ "UpdateEnvironmentFXState", updateEnvironmentFXState },
+        .{ "WaitForJumpOrLaunch", waitForJumpOrLaunch },
+        .{ "SetEnvironmentFXNebula", setEnvironmentFXNebula },
+        .{ "OpenInstrument", openInstrument },
+        .{ "CloseInstrument", closeInstrument },
+        .{ "SetObjective", setObjective },
+        .{ "SetShipAvoidance", setShipAvoidance },
+        .{ "MultiplayerScriptSync", multiplayerScriptSync },
     }) |pair| table[commandIndex(pair[0])] = pair[1];
     break :table table;
 };
@@ -222,6 +240,262 @@ fn setRescueProbabilities(call: Call) u32 {
     return 1;
 }
 
+/// `cmd_WaitForMovie` (`0x00458180`, command `0x09`): the thread waits while a film of the radio's
+/// plays (`0x0057C3A8`), running the command again each time.
+///
+/// Not ported: the radio's films ([#99](https://github.com/vdmkenny/openreliant/issues/99)), none
+/// of which plays yet, so the thread runs on.
+fn waitForMovie(call: Call) u32 {
+    _ = call;
+    return 1;
+}
+
+/// `cmd_SetupLaunch` (`0x00458970`, command `0x13`): each ship the first argument names takes a
+/// Launch order (`setupLaunchShip`), the orders numbered from 0 as they are given
+/// (`aigeneric.startNumbering`), which a launch from a flight group or a squad counts its launch
+/// points by (`launch.init`).
+fn setupLaunch(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    aigeneric.startNumbering(game.world.objects);
+    vm.Machine.forEachShip(call, setupLaunchShip);
+    aigeneric.stopNumbering(game.world.objects);
+    return 1;
+}
+
+/// `cmd_SetupLaunch_ship` (`0x004589A0`): pushes a Launch order on the ship's stack, aimed at what
+/// the command's second argument names it to launch from: a flight group or a squad by its index,
+/// whose ships' launch points the launch searches for a gate, or a ship by its slot, through the
+/// gate the third argument gives, counted on by one for each ship the walk reached before this one
+/// (`launchGate`). Aimed at anything else, it pushes no order.
+fn setupLaunchShip(call: Call, ship: u16) void {
+    const machine = call.machine;
+    const game = machine.game.?;
+    const from = call.args[0];
+    const target: aigeneric.Target = if (machine.recordKind(from)) |kind| switch (kind) {
+        .flight_group => .{ .kind = .flight_group, .index = targetIndex(machine.flightGroupIndex(from)), .component = aigeneric.Target.whole },
+        .squad => .{ .kind = .squad, .index = targetIndex(machine.squadIndex(from)), .component = aigeneric.Target.whole },
+        .ship => launchGate(machine, from, call.args[1]),
+        _ => return,
+    } else launchGate(machine, from, call.args[1]);
+    _ = aigeneric.push(game, ship, .launch, target) catch |err| log.warn("mission ship {d} does not launch: {s}", .{ ship, @errorName(err) });
+}
+
+/// The target `SetupLaunch` aims a ship at to launch from the ship `from` names: through `gate`,
+/// the low half of the command's argument, and on by one for each ship its walk reached before
+/// this one (`vm.Machine.walk_count`), wrapping round as a halfword does.
+fn launchGate(machine: *const vm.Machine, from: u32, gate: u32) aigeneric.Target {
+    const counted = @as(u16, @truncate(gate)) +% machine.walk_count -% 1;
+    return .{ .kind = .ship, .index = targetIndex(machine.shipIndex(from)), .component = @bitCast(counted) };
+}
+
+/// `cmd_StartLaunch` (`0x00458A40`, command `0x14`): each ship the argument names starts its
+/// launch (`launch.start`).
+fn startLaunch(call: Call) u32 {
+    vm.Machine.forEachShip(call, startLaunchShip);
+    return 1;
+}
+
+/// `cmd_StartLaunch_ship` (`0x00458A60`).
+fn startLaunchShip(call: Call, ship: u16) void {
+    launch.start(call.machine.game.?.world.objects, ship);
+}
+
+/// `cmd_SetInvulnerability` (`0x00458BC0`, command `0x1A`): each ship the first argument names is
+/// made invulnerable or not (`setInvulnerabilityShip`).
+fn setInvulnerability(call: Call) u32 {
+    vm.Machine.forEachShip(call, setInvulnerabilityShip);
+    return 1;
+}
+
+/// The missions in which `SetInvulnerability` reaches the players' ships too.
+const invulnerable_players = [2]u16{ 30, 35 };
+
+/// `cmd_SetInvulnerability_ship` (`0x00458BE0`): the ship takes the invulnerability the command's
+/// second argument gives, or where the first names one of its components (`push_component`), that
+/// component does, which its damage does not read yet. Only a ship past the players' slots is
+/// reached, save in missions 30 to 35 (`invulnerable_players`).
+///
+/// Not ported: the game's mode `0x00524FE4` 1, in which the players' ships are reached too.
+fn setInvulnerabilityShip(call: Call, ship: u16) void {
+    const machine = call.machine;
+    const all = machine.game.?.world.objects;
+    const mission_number = all.mission_number;
+    const players_reached = mission_number >= invulnerable_players[0] and mission_number <= invulnerable_players[1];
+    if (ship < all.players and !players_reached) return;
+    const object = &all.slots[ship].object;
+    const value = call.args[0];
+    if (machine.argumentComponent(call.thread, 0)) |component| {
+        if (component < object.components.len) object.components[component].invulnerable = @truncate(value);
+        return;
+    }
+    object.invulnerable = @enumFromInt(@as(u8, @truncate(value)));
+}
+
+/// How loud a mission's music plays, and how often (`cmd_PlayMusic`, `0x00458E13`): for ever.
+const music_level = 80;
+const music_forever = 0;
+
+/// The room the game gives a piece's path (`cmd_PlayMusic`'s buffer), and the folder it is in.
+const music_path_size = 128;
+const music_folder = "music\\";
+
+/// `cmd_PlayMusic` (`0x00458DF0`, command `0x23`): plays the piece the first argument names from the
+/// game's music folder, for ever, at once where the second argument is set, or else once the music
+/// playing has faded out (`hog_snd.Sound.playMusic`).
+///
+/// **Fix:** the game writes a path longer than its buffer past it; OpenReliant plays nothing.
+fn playMusic(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const hearing = game.world.hearing orelse return 1;
+    const name = call.machine.text(call.args[0]) catch return 1;
+    var buffer: [music_path_size]u8 = undefined;
+    const path = std.fmt.bufPrint(&buffer, music_folder ++ "{s}", .{name}) catch {
+        log.warn("the music {s} is left out: its path is too long", .{name});
+        return 1;
+    };
+    hearing.sound.playMusic(path, music_forever, music_level, call.args[1] != 0);
+    return 1;
+}
+
+/// A command's argument read as the halfword the game stores it as, set or not.
+fn halfwordSet(argument: u32) bool {
+    return @as(u16, @truncate(argument)) != 0;
+}
+
+/// `cmd_DisableTaunts` (`0x00458F40`, command `0x27`): the enemy's taunts on the radio stop, or go
+/// on again (`input.Player.taunts_disabled`).
+fn disableTaunts(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    game.world.player.taunts_disabled = halfwordSet(call.args[0]);
+    return 1;
+}
+
+/// `cmd_DisableGenericComms` (`0x004591F0`, command `0x2E`): the remarks the radio makes by itself
+/// stop, or go on again (`input.Player.generic_comms_disabled`).
+fn disableGenericComms(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    game.world.player.generic_comms_disabled = halfwordSet(call.args[0]);
+    return 1;
+}
+
+/// `cmd_UpdateEnvironmentFXState` (`0x004591A0`, command `0x38`): what the script asks of its
+/// space takes effect at once, rather than at the next jump (`environfx.Environment.update`).
+///
+/// Not ported: the sun, the lights and the nebula aimed again from the mission's markers
+/// (`backdrop_place`, [#72](https://github.com/vdmkenny/openreliant/issues/72)).
+fn updateEnvironmentFXState(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    if (game.world.environment) |environment| environment.update();
+    return 1;
+}
+
+/// `cmd_SetEnvironmentFXNebula` (`0x00459190`, command `0x3C`): asks for the nebula the argument
+/// numbers (`environfx.Environment.requested`), which shows once the space is updated.
+fn setEnvironmentFXNebula(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    if (game.world.environment) |environment| environment.requested = call.args[0];
+    return 1;
+}
+
+/// How far back `WaitForJumpOrLaunch` runs again: over its push of the ships and itself.
+const wait_back = 4;
+
+/// `cmd_WaitForJumpOrLaunch` (`0x004595A0`, command `0x3A`): the thread waits while any ship the
+/// argument names is still jumping or launching (`jumpingOrLaunching`), pushing the argument again
+/// and running the command again each time.
+fn waitForJumpOrLaunch(call: Call) u32 {
+    const machine = call.machine;
+    machine.still_moving = false;
+    vm.Machine.forEachShip(call, jumpingOrLaunching);
+    if (machine.still_moving) return call.again(wait_back);
+    return 1;
+}
+
+/// `cmd_WaitForJumpOrLaunch_ship` (`0x004595E0`): the ship is still jumping or launching where it
+/// is one the AI's searches reach (`gameobj.GameObject.Flags.outOfSearch`) and its current order
+/// is one by which a ship jumps, warps or launches.
+fn jumpingOrLaunching(call: Call, ship: u16) void {
+    const slot = &call.machine.game.?.world.objects.slots[ship];
+    if (slot.object.flags.outOfSearch()) return;
+    const entry = slot.current() orelse return;
+    switch (entry.order) {
+        .jump_in, .jump_out, .warp_in, .warp_out, .fixed_gate_jump_in, .fixed_gate_jump_out, .jump_in_40, .jump_out_41, .launch => call.machine.still_moving = true,
+        else => {},
+    }
+}
+
+/// The display's window a command's argument numbers, where there is one.
+fn instrument(argument: u32) ?hud.windows.Window {
+    const number = std.math.cast(u4, argument) orelse return null;
+    return std.enums.fromInt(hud.windows.Window, number);
+}
+
+/// `cmd_OpenInstrument` (`0x0045D9D0`, command `0x40`): the display's window the argument numbers
+/// opens (`hud.windows.Windows.open`) and is held open until the script closes it. Opening the
+/// objectives, window 10, closes the wing status window where it is up. **Unknown:** the byte after
+/// the window's hold (`+0x25`), which the command clears.
+///
+/// Not ported: for the radio's menu, window 11, the menu started afresh (`0x00529530`,
+/// `comms_menu_run`, [#99](https://github.com/vdmkenny/openreliant/issues/99)).
+///
+/// **Fix:** the game opens a window past its fifteen from past its table; OpenReliant opens none.
+fn openInstrument(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const display = game.world.display orelse return 1;
+    const window = instrument(call.args[0]) orelse return 1;
+    const windows = &display.windows;
+    _ = windows.open(window, false);
+    windows.status.getPtr(window).held = true;
+    if (window == .objectives and windows.up(.wing_status)) windows.close(.wing_status);
+    return 1;
+}
+
+/// `cmd_CloseInstrument` (`0x0045DA30`, command `0x41`): the display's window the argument numbers
+/// closes (`hud.windows.Windows.close`), held open no more.
+fn closeInstrument(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const display = game.world.display orelse return 1;
+    const window = instrument(call.args[0]) orelse return 1;
+    display.windows.close(window);
+    display.windows.status.getPtr(window).held = false;
+    return 1;
+}
+
+/// `cmd_SetObjective` (`0x00459870`, command `0x43`): the mission's objective the first argument
+/// numbers takes the state the second gives (`hud.Objectives.set`).
+fn setObjective(call: Call) u32 {
+    const game = call.machine.game orelse return 1;
+    const display = game.world.display orelse return 1;
+    display.objectives.set(call.args[0], @enumFromInt(@as(i16, @truncate(@as(i32, @bitCast(call.args[1]))))));
+    return 1;
+}
+
+/// `cmd_SetShipAvoidance` (`0x00459A30`, command `0x49`): each ship the first argument names keeps
+/// clear of others or not (`setShipAvoidanceShip`).
+fn setShipAvoidance(call: Call) u32 {
+    vm.Machine.forEachShip(call, setShipAvoidanceShip);
+    return 1;
+}
+
+/// `cmd_SetShipAvoidance_ship` (`0x00459A50`): the ship, unless a stand-in, keeps clear of others no
+/// more where the command's second argument is set, and does again where it is not
+/// (`gameobj.GameObject.Flags.no_avoidance`).
+fn setShipAvoidanceShip(call: Call, ship: u16) void {
+    const object = &call.machine.game.?.world.objects.slots[ship].object;
+    if (object.type == .stand_in) return;
+    object.flags.no_avoidance = call.args[0] != 0;
+}
+
+/// `cmd_MultiplayerScriptSync` (`0x00459DF0`, command `0x56`): in a single-player game, the thread
+/// runs on at once.
+///
+/// Not ported: a multiplayer game's players' scripts kept in step
+/// ([#55](https://github.com/vdmkenny/openreliant/issues/55)).
+fn multiplayerScriptSync(call: Call) u32 {
+    _ = call;
+    return 1;
+}
+
 /// A command's implementation. `args` points at its first argument on the stack. The result is
 /// stored in `Thread.result`, and a zero result also ends the handler loop.
 pub const Command = Code("uint __fastcall (byte **ip, uint *args)");
@@ -344,6 +618,149 @@ test "a mission's start part makes its ships and gives them their orders" {
     try std.testing.expectEqual(.player, all.slots[1].object.wing);
     try std.testing.expectEqual(.none, all.slots[2].object.wing);
     try std.testing.expectEqual(@import("aieject.zig").RescueOdds{ .rescued = 33, .captured = 33, .killed = 34 }, world.player.rescue_odds);
+}
+
+test "the launch commands set ships up, start them, and wait for them" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    // The Reliant's flight group first, then the two Sabres', which launch from it through its
+    // tubes from the fourth on, and wait until they are out.
+    for ([_]u8{ 2, 0, 1 }) |group| {
+        try routine.op(.push_flight_group, &.{group});
+        try routine.command("CreateFlightGroup");
+    }
+    try routine.op(.push_flight_group, &.{1});
+    try routine.op(.push_ship, &.{4});
+    try routine.op(.push_byte, &.{3});
+    try routine.command("SetupLaunch");
+    try routine.op(.push_flight_group, &.{1});
+    try routine.command("StartLaunch");
+    try routine.op(.push_flight_group, &.{1});
+    try routine.command("WaitForJumpOrLaunch");
+    try routine.op(.select_global, &.{0});
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.assign, &.{});
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .globals = &.{0},
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, 0, @intFromEnum(gameobj.Type.grendel), 5),
+            testShip(2, 1, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(3, 1, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(4, 2, @intFromEnum(gameobj.Type.reliant), 60),
+        },
+        .flight_groups = &.{ testGroup(5, 0), testGroup(6, dte.FlightGroup.no_wing), testGroup(7, dte.FlightGroup.no_wing) },
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    fixture.machine.game = game;
+    try fixture.machine.start();
+
+    // Each Sabre launches from the Reliant through a tube of its own, started.
+    const all = world.objects;
+    for ([_]u16{ 2, 3 }, 3..) |ship, gate| {
+        const entry = all.slots[ship].orders[0];
+        try std.testing.expectEqual(Order.launch, entry.order);
+        try std.testing.expectEqual(4, entry.target.ship());
+        try std.testing.expectEqual(@as(i16, @intCast(gate)), entry.target.component);
+        try std.testing.expect(entry.data.launch.go);
+    }
+    // The script waits while they launch, and runs on once they are out.
+    try std.testing.expectEqual(0, fixture.global(0));
+    fixture.second();
+    try std.testing.expectEqual(0, fixture.global(0));
+    for ([_]u16{ 2, 3 }) |ship| _ = aigeneric.pop(game, ship);
+    fixture.second();
+    try std.testing.expectEqual(1, fixture.global(0));
+}
+
+test "the commands that set ships, the radio, the display and the space" {
+    const gpa = std.testing.allocator;
+    const Routine = vm.machine.testing.Routine;
+    var routine: Routine = .init(gpa);
+    defer routine.deinit();
+    for ([_]u8{ 0, 1 }) |group| {
+        try routine.op(.push_flight_group, &.{group});
+        try routine.command("CreateFlightGroup");
+    }
+    // The Sabres keep clear of nothing; the player's ship, and the second Sabre, invulnerable.
+    try routine.op(.push_flight_group, &.{1});
+    try routine.op(.push_byte, &.{1});
+    try routine.command("SetShipAvoidance");
+    for ([_]u8{ 0, 2 }) |ship| {
+        try routine.op(.push_ship, &.{ship});
+        try routine.op(.push_byte, &.{@intFromEnum(gameobj.Invulnerability.full)});
+        try routine.command("SetInvulnerability");
+    }
+    try routine.op(.push_byte, &.{1});
+    try routine.command("DisableTaunts");
+    try routine.op(.push_byte, &.{1});
+    try routine.command("DisableGenericComms");
+    // The objectives window opens, the second objective current, and nebula 6 asked for.
+    try routine.op(.push_byte, &.{@intFromEnum(hud.windows.Window.objectives)});
+    try routine.command("OpenInstrument");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.push_byte, &.{@intFromEnum(hud.Objectives.Status.current)});
+    try routine.command("SetObjective");
+    try routine.op(.push_byte, &.{6});
+    try routine.command("SetEnvironmentFXNebula");
+    try routine.op(.push_byte, &.{0});
+    try routine.command("MultiplayerScriptSync");
+    try routine.command("WaitForMovie");
+    try routine.op(.push_byte, &.{1});
+    try routine.op(.@"return", &.{});
+    const code = try routine.finish();
+    defer gpa.free(code);
+
+    var fixture: vm.machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{.{ .code = code, .start = true }}, .{
+        .ships = &.{
+            testShip(0, 0, @intFromEnum(gameobj.Type.predator), dte.Ship.no_pilot),
+            testShip(1, 1, @intFromEnum(gameobj.Type.sabre), 42),
+            testShip(2, 1, @intFromEnum(gameobj.Type.sabre), 42),
+        },
+        .flight_groups = &.{ testGroup(3, 0), testGroup(4, dte.FlightGroup.no_wing) },
+    });
+    defer fixture.deinit();
+    var world: gameobj.testing.Mission = undefined;
+    try world.init(gpa);
+    defer world.deinit();
+    world.objects.mission_number = 1;
+    var display: hud.State = .{};
+    display.objectives.reset(1, false);
+    var environment: @import("environfx.zig").Environment = .{ .sky = undefined, .textures = undefined, .lights = undefined };
+    var game = world.orders();
+    game.world.spawn = .{ .tables = &world.tables, .types = create.testing.no_models };
+    game.world.display = &display;
+    game.world.environment = &environment;
+    fixture.machine.game = game;
+    try fixture.machine.start();
+
+    const all = world.objects;
+    try std.testing.expect(!all.slots[0].object.flags.no_avoidance and all.slots[1].object.flags.no_avoidance and all.slots[2].object.flags.no_avoidance);
+    // Outside missions 30 to 35 the player's ship is not reached.
+    try std.testing.expectEqual(.none, all.slots[0].object.invulnerable);
+    try std.testing.expectEqual(.full, all.slots[2].object.invulnerable);
+    try std.testing.expect(world.player.taunts_disabled and world.player.generic_comms_disabled);
+    try std.testing.expect(display.windows.up(.objectives));
+    try std.testing.expect(display.windows.status.get(.objectives).held);
+    try std.testing.expectEqual(.current, display.objectives.states[1]);
+    try std.testing.expectEqual(1, display.objectives.shown);
+    try std.testing.expectEqual(6, environment.requested);
+    // Neither the sync nor the films hold the thread in a game of one player with no films.
+    try std.testing.expect(fixture.machine.finished);
 }
 
 test shipType {

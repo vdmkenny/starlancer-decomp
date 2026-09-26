@@ -24,7 +24,7 @@ OpenReliant improves on the original's look and sound. `--original` turns the im
 | `--ship <type>` | The ship type to fly, by its number in `shipstats.bin`, in place of the loadout screen's choice, with its default missiles; the mission's own by default, the Predator in mission 0 |
 | `--view <0\|1\|2>` | The view it starts in, as the game's settings keep it: 0 the cockpit; 1 the chase view; 2 no cockpit. The settings' own by default, which the pause menu's video screen changes, or 0 without them |
 | `--difficulty <easy\|medium\|hard>` | The game's difficulty: how hard hits land on your ship, and shots on the enemy; medium by default, as in the game |
-| `--music <file>` | The piece from the game's music folder it plays, or none; `New_Mission01.wav` by default |
+| `--music <file>` | A piece from the game's music folder to play from the start, until the mission's script plays its own; none by default |
 | `--no-pause-menu` | Start flying immediately, where the mission otherwise starts in the game's pause menu |
 
 ## Display

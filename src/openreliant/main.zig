@@ -114,7 +114,7 @@ const docs: std.enums.EnumArray(Arg, Doc) = .init(.{
     .@"--ship" = .{ .section = .mission, .value = "<type>", .text = "the ship type to fly, by its number in shipstats.bin, in place of the loadout screen's choice, with its default missiles; the mission's own by default" },
     .@"--view" = .{ .section = .mission, .value = "<0|1|2>", .text = "the view it starts in, as the game's settings keep it: 0 the cockpit; 1 the chase view; 2 no cockpit. The settings' own by default, which the pause menu's video screen changes" },
     .@"--difficulty" = .{ .section = .mission, .value = "<easy|medium|hard>", .text = "the game's difficulty: how hard hits land on your ship, and shots on the enemy; medium by default, as in the game" },
-    .@"--music" = .{ .section = .mission, .value = "<file>", .text = "the piece from the game's music folder it plays, or none; New_Mission01.wav by default" },
+    .@"--music" = .{ .section = .mission, .value = "<file>", .text = "a piece from the game's music folder to play from the start, until the mission's script plays its own; none by default" },
     .@"--no-pause-menu" = .{ .section = .mission, .text = "start flying, where the mission otherwise starts in the game's pause menu, as there is no front end yet" },
     .@"--fullscreen" = .{ .section = .display, .text = "fill the display; Alt and Enter switch while playing" },
     .@"--size" = .{ .section = .display, .value = "<width>x<height>", .text = "draw frames of this size in pixels whatever the window's, which shows them scaled; for a screenshot larger than the display" },
@@ -264,10 +264,9 @@ const Options = struct {
     sound: ?platform.audio.Options = .{},
     /// Where a missile's sound is heard from.
     missile_sound: game.sound3d.MissileSound = .follows,
-    /// The piece of music the mission plays, from `music\`, or none.
-    music: ?[]const u8 = default_music,
-
-    const default_music = "New_Mission01.wav";
+    /// A piece of music to play from the start, from `music\`, before the mission's script plays
+    /// its own; none by default.
+    music: ?[]const u8 = null,
 
     /// OpenAL Soft's settings, which a setting for it after `--original` plays with again.
     fn openAl(options: *Options) ?*platform.audio.openal.Settings {
@@ -579,6 +578,8 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     const space = try game.backdrop.Backdrop.create(arena, &textures, try tga.decode(arena, try resources.readFile(arena, game.backdrop.star_map_name)), &rand, context.projection.near, options.sun);
     const sky = try game.nebula.Sky.create(arena, &textures, try tga.decode(arena, try resources.readFile(arena, game.nebula.dome_image_name)));
     try sky.select(&textures, game.nebula.default_nebula, &space.lights);
+    // What the mission's script asks of its space: the nebula it shows.
+    var environment: game.environfx.Environment = .{ .sky = sky, .textures = &textures, .lights = &space.lights };
 
     // The engine glows every ship's thrusters burn, built once and shared by them all.
     const glows: game.environfx.Glows = try .create(arena, &textures);
@@ -652,12 +653,12 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     sound.stdsmp = stdsmp;
     sound.open3D(try openreliant.fat.Bank.parse(try resources.readFile(arena, "smp3d.fat")));
 
-    // The options' cockpit setting and the brightness, as `[Device]` keeps them, and the camera as
-    // a mission's launch leaves it: in the cockpit mode the setting picks.
+    // The options' cockpit setting and the brightness, as `[Device]` keeps them, and the camera,
+    // which keeps the setting and starts in the cockpit mode it picks, as a mission's start does.
     const video = game.hudoptions.screens.Video;
-    var cockpit_setting: camera.CockpitSetting = options.cockpit orelse @enumFromInt(settings_file.profile.int(video.section, video.view_key, 0));
+    const cockpit_setting: camera.CockpitSetting = options.cockpit orelse @enumFromInt(settings_file.profile.int(video.section, video.view_key, 0));
     var brightness = @as(f32, @floatFromInt(settings_file.profile.int(video.section, video.gamma_key, video.gamma_scale))) / video.gamma_scale;
-    var view: camera.Camera = .{ .cockpit_mode = cockpit_setting.mode(), .missiles = &objects.missiles };
+    var view: camera.Camera = .{ .setting = cockpit_setting, .cockpit_mode = cockpit_setting.mode(), .missiles = &objects.missiles };
     var last_view = view.view;
     // The mission's clocks, which `mission_run` zeroes before it loops.
     var clock: game.main.Clock = .{};
@@ -704,7 +705,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     while (lacking.next()) |effect| std.log.warn("forces\\{s} is missing or isn't an effect file: it plays nothing", .{effect.fileName()});
     var force_feedback: engine.input.force.Forces = .{ .library = &found_forces.library, .settings = options.forces };
     // What the objects run in, the camera's view brought up to date each frame.
-    var world: game.gameobj.World = .{ .forces = &force_feedback, .objects = objects, .player = &player, .clock = &clock, .view = view.view, .shake = &view.hit_shake, .random = &rand, .difficulty = options.difficulty, .hearing = hearing, .camera = &view, .explosions = &explosions, .particles = &particles, .smoke = &smoke, .gun_particles = &gun_particles, .shockwaves = &shockwaves, .trails = &trails, .countermeasures = &countermeasures, .sparks = &sparks, .shields = &shields, .rays = &rays, .tractors = &tractors, .flash = &flash, .spawn = .{ .tables = tables, .types = types.types() } };
+    var world: game.gameobj.World = .{ .forces = &force_feedback, .objects = objects, .player = &player, .clock = &clock, .view = view.view, .shake = &view.hit_shake, .random = &rand, .difficulty = options.difficulty, .hearing = hearing, .camera = &view, .explosions = &explosions, .particles = &particles, .smoke = &smoke, .gun_particles = &gun_particles, .shockwaves = &shockwaves, .trails = &trails, .countermeasures = &countermeasures, .sparks = &sparks, .shields = &shields, .rays = &rays, .tractors = &tractors, .flash = &flash, .spawn = .{ .tables = tables, .types = types.types() }, .environment = &environment };
 
     // The pause menu, which stands in the display's place while the game is paused.
     var pause_menu: game.hudoptions.PauseMenu = .{};
@@ -729,7 +730,6 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
             .file = &settings_file,
             .sound = sound,
             .stdsmp = stdsmp,
-            .view = &cockpit_setting,
             .camera = &view,
             .brightness = &brightness,
         },
@@ -752,7 +752,8 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     defer play.end();
     display.play = &play;
     try play.start(.{ .world = world, .clock = &clock, .devices = &devices });
-    // The music, as a mission's script starts it (`cmd_PlayMusic`): from `music\`, for ever, at 80.
+    // A piece of music asked for, as a mission's script plays one (`cmd_PlayMusic`): from `music\`,
+    // for ever, at 80.
     if (options.music) |name| {
         const path = try std.fmt.allocPrint(arena, "music\\{s}", .{name});
         sound.playMusic(path, 0, 80, true);
@@ -782,7 +783,6 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
         .sound = sound,
         .menu = &pause_menu,
         .archive = resources,
-        .view_setting = &cockpit_setting,
         .camera = &view,
         .player = &objects.player,
     };
@@ -823,6 +823,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
         devices.keyboard.numbers_taken = display.state.windows.status.get(.comms).phase == .open;
         world.view = view.view;
         world.cockpit = if (cockpit.shown) |*shown| &shown.model else null;
+        world.mission = if (play.loaded) |loaded| &loaded.bound else null;
         const orders: game.aigeneric.Context = .{ .world = world, .clock = &clock, .devices = &devices };
         while (clock.nextTick(&devices, world)) |_| {}
         clock.frameBegin();
@@ -893,7 +894,7 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
         try game.main.drawFrame(arena, frame_arena.allocator(), &scene, &context, .{
             .objects = objects,
             .seat = if (slot.object.flags.hidden) objects.player else null,
-            .showing = player.showing,
+            .shown = .of(&player),
             .space = space,
             .sky = sky,
             .view = view.view,
@@ -976,11 +977,11 @@ fn run(io: Io, gpa: Allocator, arena: Allocator, options: Options) !void {
     }
 }
 
-/// The view a ship is shown in at first: view 0, as a mission's launch ends in, in `mode`. The
-/// chase mode sits a fixed distance behind, which the camera keeps per ship type, so a ship whose
-/// own radius is larger than that distance would not fit in it, as the ships `--ship` and the test
-/// keys give the player that the game never does. Those are shown in the external view, which
-/// orbits at a distance worked out from the ship's own size.
+/// The view a ship that does not launch is shown in at first: view 0, as a launch ends in, in
+/// `mode`. The chase mode sits a fixed distance behind, which the camera keeps per ship type, so a
+/// ship whose own radius is larger than that distance would not fit in it, as the ships `--ship`
+/// and the test keys give the player that the game never does. Those are shown in the external
+/// view, which orbits at a distance worked out from the ship's own size.
 fn startingView(slot: *const game.create.Slot, mode: camera.CockpitMode) camera.View {
     if (mode != .chase) return .cockpit;
     const behind = camera.Chase.offset(slot.object.type).distance;
@@ -1029,8 +1030,10 @@ const Play = struct {
             .cockpit = play.cockpit,
             .display = play.display,
         }, try play.gpa.dupe(u8, play.file), play.number);
+        // A launch holds the camera until the ship is out; a ship that does not launch starts in
+        // its view at once.
         const all = orders.world.objects;
-        _ = play.view.setView(startingView(&all.slots[all.player], play.view.cockpit_mode), all.player, false, true, play.clock.viewTime());
+        if (!play.view.locked) _ = play.view.setView(startingView(&all.slots[all.player], play.view.cockpit_mode), all.player, false, true, play.clock.viewTime());
     }
 
     /// Starts the mission again as an attempt ends, the kills kept where the ending keeps them, as
@@ -1242,7 +1245,7 @@ test Options {
     try std.testing.expectEqual(.original, retro.draw_budget);
     try std.testing.expect(!(try parsed(&.{"--no-smooth-motion"})).smooth_motion);
     try std.testing.expectEqual(.latest_two, (try parsed(&.{"--few-shot-lights"})).shot_lights);
-    // Sound is on, with the first mission's music, unless told otherwise.
+    // Sound is on unless told otherwise, and the mission's script plays its music.
     try std.testing.expect((try parsed(&.{})).sound.?.player == .openal);
     try std.testing.expectEqual(null, (try parsed(&.{"--no-sound"})).sound);
     try std.testing.expectEqual(null, (try parsed(&.{ "--no-sound", "--hrtf" })).sound);
@@ -1256,7 +1259,7 @@ test Options {
     try std.testing.expectEqual(.off, (try parsed(&.{"--no-hrtf"})).sound.?.player.openal.hrtf);
     const uncompressed = (try parsed(&.{"--no-compressor"})).sound.?.master.?;
     try std.testing.expectEqual(1, uncompressed.ratio);
-    try std.testing.expectEqualStrings(Options.default_music, (try parsed(&.{})).music.?);
+    try std.testing.expectEqual(null, (try parsed(&.{})).music);
     try std.testing.expectEqualStrings("New_Sim01.wav", (try parsed(&.{ "--music", "New_Sim01.wav" })).music.?);
     try std.testing.expectEqual(null, (try parsed(&.{ "--music", "none" })).music);
     try std.testing.expect((try parsed(&.{})).smooth_motion);

@@ -976,6 +976,7 @@ pub fn draw(state: *State, resources: *Resources, frame: Frame) (spr.Error || Al
     state.followTarget(frame.all, frame.multiplayer);
     if (frame.sound) |sound| state.lock.sound(sound, frame.view);
     state.runCharges(live, frame_duration, frame.multiplayer);
+    try state.caption.draw(&resources.font, frame.gpa, frame.target, frame.screen, frame.all.mission_number, frame.strings.*, frame.clock.game_ticks, colour, scale);
     // Where the lead cursor stands, which the reticle closes on, whether the enemy lock's light
     // shows, and how the display shakes (`hud_blit`).
     var lead: ?[2]i32 = null;
@@ -1195,6 +1196,143 @@ pub fn drawViewName(
     _ = try drawText(opened, gpa, target, at, text, colour, .centre, scale);
 }
 
+/// The launch's caption (`hud_draw`, `0x00484601`): while it is on, the date of the mission being
+/// flown, typed out at the foot of the screen a letter more each time `letter_ticks` of the game's
+/// ticks have passed, with a cursor after it until the whole date shows. The Reliant's launch puts
+/// it on as the player's ship drops out (`launch.reliant`), and off as the launch ends. It shows in
+/// every view.
+pub const Caption = struct {
+    /// `launch_caption_on` (`0x00569934`).
+    on: bool = false,
+    /// `launch_caption_due` (`0x0057BF44`): the game's tick past which the next letter shows.
+    due: u32 = 0,
+    /// `launch_caption_shown` (`0x005799E0`): how many of the date's letters show, one past them
+    /// all once it is whole.
+    shown: usize = 0,
+
+    /// How often a letter more shows, in the game's ticks (`0x00484665`).
+    const letter_ticks = 8;
+    /// Where the date stands, in the display's own pixels: from the screen's left, and up from its
+    /// foot (`0x004846CE`, `0x004846C9`).
+    const left = 50;
+    const up = 30;
+    /// The cursor after the typed letters (`0x004E86E0`).
+    const cursor = "_";
+
+    pub fn start(caption: *Caption, game_ticks: u32) void {
+        caption.* = .{ .on = true, .due = game_ticks };
+    }
+
+    pub fn stop(caption: *Caption) void {
+        caption.on = false;
+    }
+
+    /// Types on through `text` at `game_ticks`: what shows of it, and whether the cursor does.
+    pub fn typed(caption: *Caption, text: []const u8, game_ticks: u32) struct { []const u8, bool } {
+        if (game_ticks > caption.due) {
+            caption.due = game_ticks + letter_ticks;
+            if (caption.shown < text.len + 1) caption.shown += 1;
+        }
+        return .{ text[0..@min(caption.shown, text.len)], caption.shown < text.len + 1 };
+    }
+
+    /// Draws the caption where `hud_draw` does, where it is on: the date of mission `mission` out of
+    /// `strings`, typed on at `game_ticks`.
+    pub fn draw(
+        caption: *Caption,
+        opened: *Opened,
+        gpa: Allocator,
+        target: device.Device,
+        screen: [2]u32,
+        mission: u16,
+        strings: language.Language,
+        game_ticks: u32,
+        colour: [4]f32,
+        scale: f32,
+    ) Allocator.Error!void {
+        if (!caption.on) return;
+        const text = strings.string(date(mission) orelse return) orelse return;
+        const shows, const typing = caption.typed(text, game_ticks);
+        const at: [2]i32 = .{ pixels(left, scale), @as(i32, @intCast(screen[1])) - pixels(up, scale) };
+        const end = try drawText(opened, gpa, target, at, shows, colour, .left, scale);
+        if (typing) _ = try drawText(opened, gpa, target, .{ end, at[1] }, cursor, colour, .left, scale);
+    }
+
+    /// The language string of mission `mission`'s date (`mission_dates`, `0x005023D6`): the table
+    /// holds the dates of missions 1 to 28, one after another from `first_date`, and nothing for
+    /// mission 0 or those after.
+    pub fn date(mission: u16) ?u16 {
+        if (mission == 0 or mission >= dated_missions) return null;
+        return first_date + mission - 1;
+    }
+
+    const first_date = 978;
+    const dated_missions = 29;
+};
+
+/// The objectives of the mission being flown (`mission_objectives`, `0x00504120`): ten a mission,
+/// each named by a language string from the executable's table (`objectives.rows`) and in a
+/// state its script sets (`SetObjective`), which the objectives window shows
+/// ([#98](https://github.com/vdmkenny/openreliant/issues/98)).
+pub const Objectives = struct {
+    /// The mission's row of the table, null for a mission the table has none for.
+    row: ?usize = null,
+    states: [per_mission]Status = @splat(.hidden),
+    /// `objectives_shown` (`0x0056997E`): the objective the window shows.
+    shown: i16 = 0,
+
+    pub const per_mission = 10;
+
+    /// How the window shows an objective. **Unknown:** what else sets an objective hidden than a
+    /// mission's script.
+    pub const Status = enum(i16) {
+        /// Not shown: paging through the window passes it over.
+        hidden = 0,
+        /// Shown as an objective.
+        listed = 1,
+        /// Shown as the current objective.
+        current = 2,
+        _,
+    };
+
+    /// The table's rows past the missions' own: mission 25's second part.
+    const second_part_row = 35;
+
+    /// The table's row for mission `mission`, or its second part's: missions 1 to 35 in turn, then
+    /// mission 25's second part (`hud_window_draw`, `0x00486CDE`). Null for the rest.
+    pub fn rowOf(mission: u16, second_part: bool) ?usize {
+        if (mission == create.kamov_mission and second_part) return second_part_row;
+        if (mission == 0 or mission > second_part_row) return null;
+        return mission - 1;
+    }
+
+    /// `objectives_reset` (`0x00499180`), as `hud_init` readies the display for mission `mission`,
+    /// and its second part where `second_part`: the first objective is the current one, and
+    /// each other that has a name is listed; the window shows the first (`0x00483AC0`).
+    pub fn reset(objectives: *Objectives, mission: u16, second_part: bool) void {
+        objectives.* = .{ .row = rowOf(mission, second_part) };
+        const row = objectives.row orelse return;
+        for (&objectives.states, objectives_table.rows[row], 0..) |*state, name, n| {
+            state.* = if (n == 0) .current else if (name != null) .listed else .hidden;
+        }
+    }
+
+    /// `cmd_SetObjective` (`0x00459870`): objective `objective` of the mission takes state
+    /// `state`, and one made current is the one the window shows. An objective past the ten, or a
+    /// mission the table has no row for, changes nothing.
+    ///
+    /// **Fix:** the game writes an objective past the ten into the next mission's, and mission 0's
+    /// before the table.
+    pub fn set(objectives: *Objectives, objective: u32, state: Status) void {
+        if (objectives.row == null or objective >= per_mission) return;
+        objectives.states[objective] = state;
+        if (state == .current) objectives.shown = @intCast(objective);
+    }
+};
+
+/// The table of the objectives' names.
+pub const objectives_table = @import("hud/objectives.zig");
+
 /// Where `hud_draw` centres the mission's clock: half of the way across, at the foot of the screen
 /// and `130` up.
 pub const clock_offset: [2]i32 = .{ 0, -130 };
@@ -1231,6 +1369,46 @@ test drawClock {
     // The figures are padded to two as "%02d:%02d" does.
     var buffer: [16]u8 = undefined;
     try std.testing.expectEqualStrings("09:06", try std.fmt.bufPrint(&buffer, "{d:0>2}:{d:0>2}", .{ @as(u16, 9), @as(u16, 6) }));
+}
+
+test Caption {
+    var caption: Caption = .{};
+    caption.start(100);
+    // A letter more each time eight ticks have passed, the cursor after them until all show.
+    try std.testing.expectEqualDeep(.{ "", true }, caption.typed("June", 100));
+    try std.testing.expectEqualDeep(.{ "J", true }, caption.typed("June", 101));
+    try std.testing.expectEqualDeep(.{ "J", true }, caption.typed("June", 109));
+    try std.testing.expectEqualDeep(.{ "Ju", true }, caption.typed("June", 110));
+    for (0..3) |n| _ = caption.typed("June", @intCast(120 + 10 * n));
+    try std.testing.expectEqualDeep(.{ "June", false }, caption.typed("June", 150));
+    // Missions 1 to 28 have dates, in order.
+    try std.testing.expectEqual(978, Caption.date(1));
+    try std.testing.expectEqual(1005, Caption.date(28));
+    try std.testing.expectEqual(null, Caption.date(0));
+    try std.testing.expectEqual(null, Caption.date(29));
+}
+
+test Objectives {
+    var objectives: Objectives = .{};
+    // Mission 1 lists its two objectives, the first current.
+    objectives.reset(1, false);
+    try std.testing.expectEqual(.current, objectives.states[0]);
+    try std.testing.expectEqual(.listed, objectives.states[1]);
+    try std.testing.expectEqual(.hidden, objectives.states[2]);
+    // Its script makes the second current, which the window then shows.
+    objectives.set(1, .current);
+    try std.testing.expectEqual(1, objectives.shown);
+    objectives.set(0, .hidden);
+    try std.testing.expectEqual(1, objectives.shown);
+    // Past the ten, nothing changes.
+    objectives.set(10, .listed);
+    // Mission 25's second part has a row of its own; mission 0 none.
+    try std.testing.expectEqual(35, Objectives.rowOf(25, true));
+    try std.testing.expectEqual(24, Objectives.rowOf(25, false));
+    try std.testing.expectEqual(null, Objectives.rowOf(0, false));
+    objectives.reset(0, false);
+    objectives.set(0, .listed);
+    try std.testing.expectEqual(.hidden, objectives.states[0]);
 }
 
 test namesView {
@@ -1531,6 +1709,10 @@ pub const State = struct {
     lock_warning: ?u8 = null,
     /// The display's interference as the player's ship is hit.
     interference: Interference = .{},
+    /// The date the player's launch types out.
+    caption: Caption = .{},
+    /// The mission's objectives.
+    objectives: Objectives = .{},
     /// `target_under_reticle` (`0x00566550`): whether the reticle was drawn bright, a target under
     /// it or blind fire aiming at it, which the chase view's sight shows (`chase.Chase`).
     reticle_bright: bool = false,

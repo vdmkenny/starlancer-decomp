@@ -43,6 +43,15 @@ pub const Place = struct {
     pub fn inverse(place: Place, at: Vector) Vector {
         return transformTransposed(place.orientation, at - place.position);
     }
+
+    /// This place, standing in the world, as it stands in `parent`'s frame: the reverse of
+    /// `within`.
+    pub fn relativeTo(place: Place, parent: Place) Place {
+        return .{
+            .position = parent.inverse(place.position),
+            .orientation = product(transpose(parent.orientation), place.orientation),
+        };
+    }
 };
 
 // The helpers add in the order the engine's do, which with the FPU rounding to single precision, as
@@ -404,6 +413,11 @@ test Place {
     const world = place.point(local);
     try std.testing.expectEqual(Vector{ 1, 7, 3 }, world);
     try std.testing.expectEqual(local, place.inverse(world));
+    // A place taken into another's frame and back out stands where it stood.
+    const other: Place = .{ .position = .{ -4, 0, 9 }, .orientation = fromAngles(0.3, -1.2, 0.5) };
+    const back = other.relativeTo(place).within(place);
+    try expectVector(other.position, back.position);
+    for (other.orientation, back.orientation) |expected, actual| try std.testing.expectApproxEqAbs(expected, actual, 1e-6);
 }
 
 test halfTurn {

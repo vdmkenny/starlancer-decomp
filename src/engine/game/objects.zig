@@ -342,6 +342,28 @@ pub const PartRef = struct {
     }
 };
 
+/// A node of the model tree of the object in slot `object`: its root, or one of its model's parts,
+/// as the root's child list holds them. The game keeps the node's address where something rides
+/// it (`launch.State.node`).
+pub const NodeOf = struct {
+    object: u16,
+    /// The part, or null for the root.
+    part: ?usize = null,
+
+    /// Where the node's frame stands in the world, brought up to date with the frames it hangs
+    /// from (`SR_object_concate_parents`, `0x004C3570`): the root's as its frame has it drawn, a
+    /// part's as its model places it (`Model.frameAt`). Null for a part the object's model does not
+    /// have.
+    pub fn place(node: NodeOf, all: *const create.Objects) ?math.Place {
+        if (node.object >= all.slots.len) return null;
+        const slot = &all.slots[node.object];
+        const part = node.part orelse return slot.drawn;
+        const model = if (slot.model) |*held| held else return null;
+        if (part >= model.parts.len) return null;
+        return model.frameAt(part, slot.drawn);
+    }
+};
+
 /// A part of the model of the object in slot `object`, or of a model that model carries: what an
 /// effect hangs from.
 pub const PartOf = struct {
@@ -1243,6 +1265,17 @@ pub const Model = struct {
         pub fn drawn(part: *const Part) math.Place {
             return .{ .position = part.object.position, .orientation = part.object.orientation };
         }
+
+        /// Where its frame stands in the world with the frame it hangs from at `carrier`: at its
+        /// origin there, turned by its turn, save that a frame whose turn has ones down its
+        /// diagonal takes its parent's orientation as it is.
+        pub fn frameWithin(part: *const Part, carrier: math.Place) math.Place {
+            const unturned = part.turn[0] == 1 and part.turn[4] == 1 and part.turn[8] == 1;
+            return .{
+                .position = carrier.point(part.origin),
+                .orientation = if (unturned) carrier.orientation else math.product(carrier.orientation, part.turn),
+            };
+        }
     };
 
     /// How a node plays its animation track (node `+0xB4`).
@@ -1838,16 +1871,31 @@ pub const Model = struct {
         for (model.order) |index| {
             const part = &model.parts[index];
             const carrier: math.Place = if (part.parent) |parent| model.parts[parent].drawn() else .{ .position = position, .orientation = orientation };
-            part.object.position = carrier.point(part.origin);
-            // A frame whose turn has ones down its diagonal takes its parent's as it is.
-            const unturned = part.turn[0] == 1 and part.turn[4] == 1 and part.turn[8] == 1;
-            part.object.orientation = if (unturned) carrier.orientation else math.product(carrier.orientation, part.turn);
+            const at = part.frameWithin(carrier);
+            part.object.position = at.position;
+            part.object.orientation = at.orientation;
         }
         var each = model.carried();
         while (each.next()) |mount| {
             const at = mount.rootAt(model.parts[mount.part].drawn());
             mount.model.place(at.position, at.orientation);
         }
+    }
+
+    /// Where part `index`'s frame stands in the world with the root's at `root`: in the frame of
+    /// the part it hangs from, and that one's, up to the root, as `place` puts them
+    /// (`SR_object_concate_parents`, `0x004C3570`), whether or not the model has been placed since
+    /// its frames last moved. Parents that run in a circle stand at the root once the walk up has
+    /// taken as many steps as there are parts, as `lineage` ends it.
+    pub fn frameAt(model: *const Model, index: usize, root: math.Place) math.Place {
+        return model.frameUp(index, root, model.parts.len);
+    }
+
+    fn frameUp(model: *const Model, index: usize, root: math.Place, steps: usize) math.Place {
+        const part = &model.parts[index];
+        const parent = if (steps == 0) null else part.parent;
+        const carrier = if (parent) |up| model.frameUp(up, root, steps - 1) else root;
+        return part.frameWithin(carrier);
     }
 
     /// Whether part `index` plays a track, or a part it hangs from does: a node whose track has a
@@ -2879,6 +2927,12 @@ test "a part hangs from the part it names" {
     model.place(@splat(0), math.rotation(.y, std.math.pi / 2.0));
     try std.testing.expectApproxEqAbs(300, model.parts[0].object.position[0], 1e-3);
     try std.testing.expectApproxEqAbs(100, model.parts[1].object.position[0], 1e-3);
+
+    // A part's frame stands where placing the model would put it, the model placed or not.
+    const root: math.Place = .{ .position = .{ 0, 50, 0 }, .orientation = math.rotation(.x, 0.5) };
+    const barrel = model.frameAt(0, root);
+    model.place(root.position, root.orientation);
+    try std.testing.expectEqual(model.parts[0].drawn(), barrel);
 }
 
 test "a part whose parents run in a circle stands at the root" {

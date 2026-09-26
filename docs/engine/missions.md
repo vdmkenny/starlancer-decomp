@@ -109,7 +109,9 @@ wings. A ship's object takes the slot of the ship's index among the mission's sh
   its record (`object_orient_by_record`, `0x00452240`): its yaw about Y, then its pitch about X,
   then its roll about Z, in whole degrees.
 - A ship whose `+0x2B` names a gate launches: a Launch order, which starts at once, through that
-  gate of the first of the mission's ships whose kind is the ship's `+0x28`.
+  gate of the first of the mission's ships whose kind is the ship's `+0x28` ([Launches](launch.md)).
+  A mission makes the flight group of the ship its wing launches from first, so that the ship is
+  there as the wing is made.
 - A ship whose `+0x15` names a pilot gets it (`object_set_pilot`).
 
 **Fix:** from mission 14 on, the game takes a ship of the player's wing whose kind is none of the
@@ -156,8 +158,8 @@ clock ticking once for each 100 of the game's ticks the pause does not hold. The
 ([#44](https://github.com/vdmkenny/openreliant/issues/44)), `openreliant` chooses the loadout's ship,
 `--ship` or the test keys, and where it chooses none the player's record's kind stands.
 
-A stand-in: the mission's start plays the player's engine, which the launch starts (`launch_run`),
-until the launches are ported ([#280](https://github.com/vdmkenny/openreliant/issues/280)).
+The orders reach the mission's records through the world (`gameobj.World.mission`), for an order
+aimed at a flight group or a squad ([Orders](orders.md#targets-that-name-several-ships)).
 
 Not ported: the rest of the loading and of `mission_start`: the renderer's and the textures'
 setting up and the loading screen, which are the front end's

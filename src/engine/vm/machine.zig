@@ -40,6 +40,15 @@ pub const Call = struct {
     thread: u8,
     /// Its arguments on the thread's stack, the first first.
     args: []u32,
+
+    /// Has the thread run the command again when it runs next, and yields, as a command that waits
+    /// does: its instruction pointer goes back `back` bytes, to the command itself, or to the
+    /// pushes of its arguments before it too, which then push them afresh (`*ip -= back`).
+    pub fn again(call: Call, back: u32) u32 {
+        const thread = &call.machine.threads[call.thread];
+        if (thread.ip) |at| thread.ip = at -% back;
+        return 0;
+    }
 };
 
 /// What ends a thread where the game faults or reads past a table.
@@ -202,6 +211,8 @@ pub const Machine = struct {
     /// later one's object names (`GameObject._unknown_698`); and `0x00537575`, how many it has.
     walk_first: ?u16 = null,
     walk_count: u8 = 0,
+    /// `0x0052A1E0`: whether the ships `WaitForJumpOrLaunch` walks are still jumping or launching.
+    still_moving: bool = false,
 
     pub fn init(gpa: Allocator, mission: *bind.Mission, random: *libcmt.Rand) Machine {
         return .{ .gpa = gpa, .mission = mission, .random = random };
@@ -983,6 +994,15 @@ pub const Machine = struct {
         const value = try machine.big(at);
         thread.ip = at + 2;
         return value;
+    }
+
+    /// The text a string argument points at in the mission's image (`push_string`), up to its
+    /// terminating zero.
+    pub fn text(machine: *const Machine, at: u32) Fault![]const u8 {
+        const image = machine.mission.image;
+        if (at >= image.len) return error.OutsideImage;
+        const rest = image[at..];
+        return rest[0 .. std.mem.indexOfScalar(u8, rest, 0) orelse return error.OutsideImage];
     }
 
     fn bytes(machine: *Machine, at: u32, count: u32) Fault![]u8 {

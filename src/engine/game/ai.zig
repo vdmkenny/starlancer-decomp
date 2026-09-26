@@ -7,6 +7,8 @@ const assert = std.debug.assert;
 
 const engine = @import("../../engine.zig");
 const Pointer = engine.Pointer;
+const dte = @import("../../formats/dte.zig");
+const bind = @import("mission/bind.zig");
 const gameobj = @import("gameobj.zig");
 const Routine = gameobj.Routine;
 const camera = @import("camera.zig");
@@ -311,6 +313,89 @@ pub fn setTargetable(object: *gameobj.GameObject, combat: ?*const create.ShipCom
     object.flags.targetable = targetable and allowed;
 }
 
+/// `order_target_walk` (`0x00401CB0`): `visitor.visit` for each ship an order's `target` names,
+/// until a visit returns true: the ship itself, as the target names it; each ship of a flight group,
+/// whole; and each ship of a squad (`squadWalk`). Whether a visit ended the walk. A flight group or
+/// a squad names no ship where no mission is bound (`gameobj.World.mission`). Dock, Escort, the
+/// search for a new target, the search for a pod to scoop up, the Dark Reign's guns and Launch walk
+/// their targets so. **Unverified:** it lies before this file's known code.
+pub fn eachShip(world: gameobj.World, target: aigeneric.Target, visitor: anytype) bool {
+    switch (target.kind) {
+        .ship => return visitor.visit(target),
+        .flight_group => {
+            const mission = world.mission orelse return false;
+            const groups = mission.flightGroups() catch return false;
+            const group = std.math.cast(usize, target.index) orelse return false;
+            if (group >= groups.len) return false;
+            return groupWalk(mission, groups[group], visitor);
+        },
+        .squad => {
+            const mission = world.mission orelse return false;
+            return squadWalk(mission, std.math.cast(u16, target.index) orelse return false, visitor, 0);
+        },
+        _ => return false,
+    }
+}
+
+/// Each ship of flight group `group`, whole, for `eachShip`.
+fn groupWalk(mission: *const bind.Mission, group: dte.FlightGroup, visitor: anytype) bool {
+    for (mission.groupShips(group)) |ship| {
+        if (visitor.visit(aigeneric.Target.at(ship, null))) return true;
+    }
+    return false;
+}
+
+/// `squad_walk` (`0x00401D80`): `eachShip`'s walk of squad `squad`, `depth` squads down: its
+/// members in turn from its first, while they are its own: a ship, as the member names its
+/// component; a flight group's ships, whole; and a squad's own walk.
+///
+/// **Fix:** the game walks a squad that holds itself round for ever, takes a member no record
+/// stands for as the ship at address zero, and stops with a fatal error at a member of a kind it
+/// does not know; OpenReliant stops once the walk has gone down more squads than the mission has,
+/// and passes over the member.
+fn squadWalk(mission: *const bind.Mission, squad: u16, visitor: anytype, depth: usize) bool {
+    const file = mission.file;
+    const squads = file.squads() catch return false;
+    if (squad >= squads.len or depth > squads.len) return false;
+    const members = file.records(dte.SquadMember, .squad_members) catch return false;
+    const kinds = file.objects() catch return false;
+    const groups = mission.flightGroups() catch return false;
+    const first: usize = squads[squad].first_member;
+    if (first >= members.len) return false;
+    for (members[first..]) |member| {
+        if (member.squad != squad) return false;
+        const id = member.object_id;
+        if (id >= kinds.len or id >= mission.records.len) continue;
+        const record = mission.records[id] orelse continue;
+        switch (kinds[id].kind) {
+            .ship => {
+                const ship = switch (record) {
+                    .ship => |at| at,
+                    else => continue,
+                };
+                const component: ?u16 = if (member.component == dte.Trigger.whole_object) null else member.component;
+                if (visitor.visit(aigeneric.Target.at(ship, component))) return true;
+            },
+            .flight_group => {
+                const group = switch (record) {
+                    .flight_group => |at| at,
+                    else => continue,
+                };
+                if (group < groups.len and groupWalk(mission, groups[group], visitor)) return true;
+            },
+            .squad => {
+                const inner = switch (record) {
+                    .squad => |at| at,
+                    else => continue,
+                };
+                if (squadWalk(mission, inner, visitor, depth + 1)) return true;
+            },
+            _ => continue,
+        }
+    }
+    return false;
+}
+
 test hullLost {
     var mission: gameobj.testing.Mission = undefined;
     try mission.init(std.testing.allocator);
@@ -376,6 +461,76 @@ test setTargetable {
     object.flags.targetable = true;
     setTargetable(&object, null, true);
     try std.testing.expect(!object.flags.targetable);
+}
+
+test eachShip {
+    const gpa = std.testing.allocator;
+    // Ships 0 to 3, the first two in flight group 0. Squad 0 holds ship 2's component 5, the flight
+    // group, and squad 1, which holds ship 3.
+    var ships: [4]dte.Ship = @splat(std.mem.zeroes(dte.Ship));
+    for (&ships, 0..) |*ship, n| {
+        ship.object_id = @intCast(n);
+        ship.flight_group = if (n < 2) 0 else dte.Ship.no_flight_group;
+    }
+    var group = std.mem.zeroes(dte.FlightGroup);
+    group.object_id = 4;
+    var squads: [2]dte.Squad = @splat(std.mem.zeroes(dte.Squad));
+    squads[0].object_id = 5;
+    squads[0].first_member = 0;
+    squads[1].object_id = 6;
+    squads[1].first_member = 3;
+    const Member = struct {
+        fn of(object_id: u16, squad: u16, component: u8) dte.SquadMember {
+            return .{ .object_id = object_id, ._unknown_02 = 0, .squad = squad, ._unknown_06 = 0, .component = component, ._unknown_09 = @splat(0) };
+        }
+    };
+    const whole = dte.Trigger.whole_object;
+    const members = [_]dte.SquadMember{ Member.of(2, 0, 5), Member.of(4, 0, whole), Member.of(6, 0, whole), Member.of(3, 1, whole) };
+    var kinds: [7]dte.Object = @splat(.{ .kind = .ship, .count = 0, .first = 0, ._unknown_04 = 0 });
+    kinds[4].kind = .flight_group;
+    kinds[5].kind = .squad;
+    kinds[6].kind = .squad;
+    var fixture: @import("../vm.zig").machine.testing.Fixture = undefined;
+    try fixture.init(gpa, &.{}, .{ .ships = &ships, .flight_groups = &.{group}, .objects = &kinds, .squads = &squads, .squad_members = &members });
+    defer fixture.deinit();
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(gpa);
+    defer mission.deinit();
+    var world = mission.world();
+    world.mission = &fixture.mission;
+
+    const Seen = struct {
+        targets: [8]aigeneric.Target = undefined,
+        count: usize = 0,
+        stop_at: usize = 0,
+
+        pub fn visit(seen: *@This(), target: aigeneric.Target) bool {
+            seen.targets[seen.count] = target;
+            seen.count += 1;
+            return seen.count == seen.stop_at;
+        }
+    };
+    // A ship is visited as the target names it.
+    var one: Seen = .{};
+    try std.testing.expect(!eachShip(world, .at(3, 7), &one));
+    try std.testing.expectEqualSlices(aigeneric.Target, &.{.at(3, 7)}, one.targets[0..one.count]);
+    // A flight group's ships, whole.
+    var flight: Seen = .{};
+    _ = eachShip(world, .{ .kind = .flight_group, .index = 0, .component = aigeneric.Target.whole }, &flight);
+    try std.testing.expectEqualSlices(aigeneric.Target, &.{ .at(0, null), .at(1, null) }, flight.targets[0..flight.count]);
+    // A squad's members in turn, down into the flight group and the squad it holds.
+    const squad: aigeneric.Target = .{ .kind = .squad, .index = 0, .component = aigeneric.Target.whole };
+    var all: Seen = .{};
+    _ = eachShip(world, squad, &all);
+    try std.testing.expectEqualSlices(aigeneric.Target, &.{ .at(2, 5), .at(0, null), .at(1, null), .at(3, null) }, all.targets[0..all.count]);
+    // A visit that returns true ends the walk.
+    var two: Seen = .{ .stop_at = 2 };
+    try std.testing.expect(eachShip(world, squad, &two));
+    try std.testing.expectEqual(2, two.count);
+    // With no mission bound, a flight group names no ship.
+    var none: Seen = .{};
+    try std.testing.expect(!eachShip(mission.world(), .{ .kind = .flight_group, .index = 0, .component = aigeneric.Target.whole }, &none));
+    try std.testing.expectEqual(0, none.count);
 }
 
 /// `object_cruise_speed` (`0x00403060`), which lies after this file's known code, before
@@ -829,7 +984,7 @@ test "a ship steered at a point comes round to face it" {
     const before = off(slot, at);
     for (0..50) |_| {
         turn(slot, at, 1, 0, .{ .roll_upright = true }, 1, false);
-        motion.move(&slot.object, slot.flight.?, .chase, .forward, null);
+        motion.move(&slot.object, .{ .own = slot.flight.? }, .chase, .forward, null);
         // What the next step commits, which the steering then reads.
         slot.object.root.position = slot.object.root.next_position;
         slot.object.root.orientation = slot.object.root.next_orientation;

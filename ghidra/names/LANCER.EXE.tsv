@@ -670,7 +670,7 @@ address	kind	name	type	comment
 0058a6a8	data	nebula_patch	void *	
 0058a6ac	data	nebula_patch_small	void *	Nebula 5's
 0058a100	data	nebula_shown_patch	void *	
-0058a6b8	data	nebula_requested	int	Set by SetEnvironmentFXNebula
+0058a6b8	data	nebula_requested	int	Set by SetEnvironmentFXNebula, shown by environment_update
 0058a6b4	data	nebula_shown	int	
 00504000	data	nebula_fill_colours	float[21]	Red, green and blue for each of the seven nebulae
 004ff808	data	environment_effects		Thirteen 32-byte entries: switch-on and switch-off handlers, then a name
@@ -751,7 +751,7 @@ address	kind	name	type	comment
 00595070	data	vfx_pane_wipe	void *	VFX_pane_wipe, looked up out of the VFX library
 00490dc0	function	language_init	void (void)	Loads language.dll and reads its string table with LoadStringA, from id 1 up to the first id with no string or an empty one, into language_strings; then reads the module's version language into 0x00563A14
 00491030	function	language_string	char * __fastcall (int id)	The string of an id out of language_strings; stops the game with the fatal error 'id out of range' for an id past them
-0041b240	function	launch_run	void __fastcall (int slot)	Runs a launch a step at a time on its order state's timer. For the player it picks one of three cutaways (views 0x20 to 0x22) and starts the launch's typed text; at the last step it sets cockpit_mode from cockpit_mode_setting (0 the cockpit, 1 the chase view, any other none) and, from a launch cutaway, switches to view 0; then pops the order, makes the ship targetable and posts the Launched event
+0041b240	function	launch_reliant_run	void __fastcall (int slot)	The Reliant's launch, a step each time its wait has passed: the engine, the cutaway and the upper door; the retainer lowering the player's ship and letting go; the lower doors opening; the drop by motion_downward with the date typed; the cutaway ending; flying ahead again; at the end the cockpit mode from its setting, view 0 again, the order popped, targetable, Launched posted
 00491e20	function	game_pause	void __fastcall (bool pause, bool quiet)	Pauses or resumes the mission. Pausing sets paused, holds the frame timing, pauses the voices, hands sr + 0x88 pause_menu_draw in place of hud_draw, opens the menu and, in a session unless quiet, sends the pause; resuming undoes it, puts hud_draw back and, if cockpit_mode_setting changed meanwhile, switches to view 0. The music goes on
 004aab20	function	message_pump	int (void)	Pumps the window's messages; as the window goes inactive, pauses the music, the 3D voices and the voices and the mission (game_pause) and waits until it is active again, when the sound goes on; 0 on WM_QUIT
 005d6cac	data	app_active	bool	Whether the renderer runs: renderer_start sets it and 0x004AD3E0 clears it. The message pump pauses only while it is set
@@ -822,8 +822,8 @@ address	kind	name	type	comment
 005de344	data	atan_table	float[4097]	The arctangent of 0 to 1 in steps of 1/4096, for sr_atan and sr_atan2
 005e2348	data	ease_table	float[4096]	(sin((i / 4096 - 0.5) × pi) + 1) / 2, for sr_ease
 00562ce4	data	player_speed_change	float	How much the player's speed changed in the last object_move; nothing reads it
-004744e0	function	motion_upward	void __fastcall (int slot)	object_steer without throttle turns, then the velocity through the flight model's inertia toward the throttle times its top speed along the object's Y axis, with a fixed flight model (0x004F9E70) for models of kind 1. Selected by the launch orders and the Ripper
-00474570	function	motion_plain	void __fastcall (int slot)	motion_upward along the object's Z axis, with the fixed flight model for models of kind 1 unless the type is 31: a simpler flight model with no throttle rules or afterburner. Selected by the Ripper, launch and landing orders
+004744e0	function	motion_downward	void __fastcall (int slot)	The plain flight model along the object's Y axis, which points below it: object_steer without throttle turns, then the velocity through the flight model's inertia toward the throttle times its top speed, the last throttle nothing; a fighter flies by the first ship type's flight model (0x004F9E70). Selected by the Reliant's launch and the Ripper
+00474570	function	motion_plain	void __fastcall (int slot)	motion_downward along the object's Z axis, keeping the throttle as the last, the Ripper flying by its own flight model whatever its class: a flight model with no throttle rules or burns. Selected by a torpedo's launch, the Ripper and the landing orders
 00474610	function	motion_brake	void __fastcall (int slot)	Slows the object to 0.97 of its velocity each update. Selected by the Eject order
 00474640	function	motion_jump_out	void __fastcall (int slot)	Moves the object to a point between the two in its order state (+0x5C, +0x68), each coordinate eased (0x00426900) by the time since the jump started; no rotation. Selected by the Jump Out order
 004746d0	function	motion_jump_in	void __fastcall (int slot)	Flies the object along its nose at 2400 (600 without components), less 0.003 of that per unit of time since the jump started, but never slower than its cruise speed; no rotation. Selected by the Jump In order
@@ -1407,7 +1407,7 @@ address	kind	name	type	comment
 0045e1a0	function	object_fit_missiles	void __fastcall (GameObject *object, bool multiplayer_models)	Hangs each rack's pod or missile (attachment_models kind 0, the second model in multiplayer) on the missile attachments of the root's child parts, its count from the model table; a type below 0 leaves count 0 and stops the fitting there; fatal past 20
 00491320	function	lock_rings_free	void (void)	Frees the lock rings and their mesh
 00456a80	function	radio_missile_warning	void (void)	While a missile homes on the player's ship in action, at most every 1000 ticks, Moose says one of plck_001 to plck_008
-0041a390	function	launch_tube_boost	void __fastcall (int slot)	A stage of the Launch order: throttle 2 at the carrier's velocity with sound 0x18 and a trail of the torpedo's look for 200 ticks, then flies forward, pops the order, becomes targetable and collides, and posts Launched
+0041a390	function	launch_torpedo_run	void __fastcall (int slot)	A torpedo's launch: at step 2 it lets go of its tube, heard (sound 0x18), boosting at throttle 2 by motion_plain from the carrier's velocity with a torpedo's trail; 200 ticks on it flies itself, its order popped, targetable and colliding again, Launched posted
 00461c40	function	camera_set_view_call	void __fastcall (int view, int object, bool force, bool unknown)	Calls camera_set_view
 00494e10	function	missiles_free	void (void)	Frees the missile and trail pools and clears missiles_initialised
 0057e020	data	missile_lock_target	OrderEntry	The target and component the lock began on, at +4 and +6, laid out as an order entry for ai_target_node
@@ -1526,3 +1526,23 @@ address	kind	name	type	comment
 00537575	data	for_each_ship_count	byte	The ships the running for_each_ship has run its callback for
 0045d8e0	function	vm_tag_pop	void (void)	Takes the last tag off vm_component_tag_list
 00588390	data	camera_marker	short	The camera's marker, which mission_start makes at (0, 0, -8000) in the slot after the mission's ships, and the flyby and target views move about
+00401cb0	function	order_target_walk	bool __fastcall (int slot, void *visit)	Hands each ship the slot's current order's target names to a routine until it returns true: the ship itself, a flight group's ships whole, a squad's by squad_walk
+00401d80	function	squad_walk	bool __fastcall (int slot, uint squad, void *visit)	order_target_walk's walk of a squad: its members in turn while they are its own, a ship as the member names its component, a flight group's ships whole, a squad's own walk
+00418a70	function	launches_init	void (void)	Clears the cutaway the player's launch picked, and makes the six particle emitters of the Yamato's launch
+00418d80	function	launches_free	void (void)	Lets the Yamato's launch's emitters go
+00418db0	function	launch_start	void __fastcall (int slot)	Has the first Launch among the ship's orders go: sets the first byte of its data. StartLaunch, the Kamov's LAUNCH MISSILE and multiplayer packets call it
+00418df0	function	launch_find_gate	bool __fastcall (int slot, OrderEntry *carrier)	The search for a gate over order_target_walk: the ship becomes the carrier, its gate counted from 0, each launch point taking one off the order's number until it goes below 0
+0041ae20	function	launch_reliant_init	void __fastcall (int slot)	The Reliant's launch: stands the ship between its tube's two doors, riding the Reliant's root; for the player makes the hangar in the cutaway slot laid over the tube, the ship on its retainer, the camera in the cockpit held, mission_showing 2
+0041a360	function	launch_torpedo_init	void __fastcall (int slot)	A torpedo's launch: collides with nothing, and stands at its carrier's launch point by launch_attach
+0041b9f0	function	launch_attach	void __fastcall (int slot, GameObject *on)	Places the ship at the launch point of an object its order's component names, its centre of mass there and turned as the point, the point's part the node it rides; launch points are attachments of kind 8, or 5 where the pod table has no model at the part's place
+00461c60	function	camera_ease_to_player	void __stdcall (float share)	Eases the camera's angles by a share toward looking at the player's ship; every call gives 1
+00461d00	function	camera_look_at_player	void (void)	Turns the camera to look at the player's ship
+00499180	function	objectives_reset	void (void)	Every mission's first objective current, each other with a name listed
+0057e05c	data	player_carrier	GameObject *	The ship the player launched from, which a launch's cutaway leaves out; once it explodes, the first Yamato. Null from the mission's start
+0051d0ec	data	launch_cutaway	int	Which of three cutaways the player's launch from the Reliant shows: 1 the bay, 2 from below, 3 aside; -1 before a launch
+00569934	data	launch_caption_on	int	Set while the display types out the mission's date, from the drop of the player's launch to its end
+0057bf44	data	launch_caption_due	int	The game's tick after which the date shows a letter more
+005799e0	data	launch_caption_shown	int	How many letters of the date show
+005023d6	data	mission_dates	short[29]	The language string of each mission's date, which the launch types out: 0 for mission 0, then missions 1 to 28
+004e3c98	data	launch_styles		The launch styles' routines, 24 bytes a style: init, update, two nulls, 0x00515D70 and a null
+0052a1e0	data	wait_still_moving	byte	Set by WaitForJumpOrLaunch's walk where a ship still jumps, warps or launches

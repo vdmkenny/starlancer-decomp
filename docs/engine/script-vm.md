@@ -132,10 +132,29 @@ their arguments after the first, and it walks the entity (`0x0045D480`):
 Before the routine runs for a ship, its object's `+0x698` becomes a reference (`dte.Reference`) to
 the first ship the walk ran for, none for the first (`0x0045D720`). **Unknown:** what reads it.
 
-`SetAI` numbers the orders it gives from 0 as it walks (`0x0040CBC0`, `0x0040CBE0`): each order
-pushed takes the next number (`0x005185A8`) while the byte at `0x005185B1` is set, and 0 otherwise.
-The escort, the formations, the jumps, Launch and Warp Out read the number, a ship's place among
-its group's.
+`SetAI` and `SetupLaunch` number the orders they give from 0 as they walk (`0x0040CBC0`,
+`0x0040CBE0`): each order pushed takes the next number (`0x005185A8`) while the byte at
+`0x005185B1` is set, and 0 otherwise. The escort, the formations, the jumps, Launch and Warp Out
+read the number, a ship's place among its group's.
+
+A command that waits runs again when its thread runs next: it moves the thread's instruction
+pointer back over itself and returns zero. `WaitForMovie` moves it back 2 bytes, over the command
+alone; `WaitForJumpOrLaunch` 4, over the push of its argument too, which then pushes it afresh.
+
+Some of the commands mission 1 runs:
+
+| Command | What it does |
+|---|---|
+| `SetInvulnerability` (`0x1A`) | Each ship the first argument names takes the invulnerability the second gives, or the component `push_component` named for it does. Only ships past the players' slots are reached, save in missions 30 to 35 and in the game's mode `0x00524FE4` 1 ([Objects](objects.md)) |
+| `PlayMusic` (`0x23`) | Plays `music\` and the name the first argument points at, for ever at level 80, at once where the second is set, or once the music playing has faded out ([Sound](sound.md#music)) |
+| `DisableTaunts` (`0x27`), `DisableGenericComms` (`0x2E`) | Keep the enemy's taunts on the radio (`0x00529CB4`), and the remarks the radio makes by itself (`0x00529538`), quiet while the argument is set |
+| `UpdateEnvironmentFXState` (`0x38`) | Applies what the script asks of its space at once rather than at the next jump (`environment_update`), and aims the sun, the lights and the nebula again from the markers (`backdrop_place`) ([Backdrop](backdrop.md)) |
+| `SetEnvironmentFXNebula` (`0x3C`) | Asks for the nebula the argument numbers (`nebula_requested`, `0x0058A6B8`) |
+| `WaitForMovie` (`0x09`) | Waits while a film of the radio's plays (`0x0057C3A8`) |
+| `OpenInstrument` (`0x40`), `CloseInstrument` (`0x41`) | Open the display's window the argument numbers, held open, or close it ([Display](hud.md#the-windows)) |
+| `SetObjective` (`0x43`) | Sets the state of one of the mission's objectives ([Display](hud.md#the-objectives)) |
+| `SetShipAvoidance` (`0x49`) | Each ship the first argument names, unless a stand-in, keeps clear of others no more while the second is set (`no_avoidance`, [Orders](orders.md#avoidance)) |
+| `MultiplayerScriptSync` (`0x56`) | In a multiplayer game, holds the players' scripts in step; in a game of one, runs on |
 
 ## The clock and timers
 
@@ -234,8 +253,13 @@ clock, the timers, `for_each_ship`, and the commands that lie beside the interpr
 (`CreateTimer`, `DestroyTimer`, `Wait`, `InterruptTriggerCode` and
 `KillAllScriptExecutionExecptMe`). [`game/executor.zig`](../../src/engine/game/executor.zig) has
 the commands that act on the game: `CreateFlightGroup` ([Missions](missions.md#the-missions-ships)),
-`SetAI`, `Fly` and `SetRescueProbabilities`. They act on it through the world the mission's start
-and its frame give the machine, which the game reaches through its globals. A command not ported
+`SetAI`, `Fly`, `SetRescueProbabilities`, the launch's `SetupLaunch`, `StartLaunch` and
+`WaitForJumpOrLaunch` ([Launches](launch.md#how-a-launch-is-given)), `SetInvulnerability`,
+`SetShipAvoidance`, the radio's `DisableTaunts` and `DisableGenericComms`, `PlayMusic`, the
+display's `OpenInstrument`, `CloseInstrument` and `SetObjective`, the space's
+`SetEnvironmentFXNebula` and `UpdateEnvironmentFXState`, `WaitForMovie` and
+`MultiplayerScriptSync`. They act on it through the world the mission's start and its frame give
+the machine, which the game reaches through its globals. A command not ported
 yet does nothing and gives 1, which lets the thread run on, and is logged the first time it runs
 ([#36](https://github.com/vdmkenny/openreliant/issues/36),
 [#281](https://github.com/vdmkenny/openreliant/issues/281)).
@@ -257,5 +281,6 @@ part table past the mission's parts have no block, where the game leaves them as
 over a member no record stands for, and a ship past the last object's slot.
 
 Not ported: the script debugger, the table of curve weights `mission_script_start` fills
-(`0x00456F00`), and the objects it creates for the ships the mission launches, with the launches
-([#280](https://github.com/vdmkenny/openreliant/issues/280)).
+(`0x00456F00`), and the ships the mission's sub-objects name, which it makes after the start part
+where the part has not (`0x004571D0`), with the sub-objects
+([#281](https://github.com/vdmkenny/openreliant/issues/281)).

@@ -141,7 +141,7 @@ it; it keeps its full volume half as far again (`sound3d.MissileSound.follows`).
 
 `sound3d_engine_sound` (`0x0049DCB0`) picks the engine's sound for the player's ship type:
 `PSHIP01` on, by type; types from 244 count again from 0. A mission starts it as the ship launches
-(`launch_run`). `sound3d_engine_update` (`0x0049DCF0`) keeps it going through three states
+(`launch_reliant_run`). `sound3d_engine_update` (`0x0049DCF0`) keeps it going through three states
 (`0x0058CB04`):
 
 - Idle: the engine's rate and volume by the ship type's row of the tables at `0x00508740`,
@@ -170,7 +170,8 @@ once the music playing has faded out. The mission script's `PlayMusic` (`cmd_Pla
 loops back to its own point, a byte offset into its data, once it has played through; the rest from
 the start. The stream's volume is `round(((Musicvolume × level) / 127) × Mastervolume / 127)`.
 `music_fade_out` (`0x00482960`) takes 5 off the level every five ticks until the stream closes, and
-`music_update` (`0x00482C30`) then starts the piece waiting.
+`music_update` (`0x00482C30`) then starts the piece waiting. Mission 1 plays `new_launch.wav` as its
+wing launches, and `new_searching mission 09.wav` once it is out.
 
 ## Where the sounds come from
 

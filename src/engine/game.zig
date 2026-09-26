@@ -30,6 +30,7 @@ pub const hog_snd = @import("game/hog_snd.zig");
 pub const sound3d = @import("game/sound3d.zig");
 pub const interface = @import("game/interface.zig");
 pub const language = @import("game/language.zig");
+pub const launch = @import("game/launch.zig");
 pub const main = @import("game/main.zig");
 pub const matmanager = @import("game/matmanager.zig");
 pub const missiles = @import("game/missiles.zig");

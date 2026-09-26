@@ -18,6 +18,7 @@ const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const guns = @import("guns.zig");
 const input = @import("../input.zig");
+const launch = @import("launch.zig");
 const Clock = @import("main.zig").Clock;
 const orders = @import("ai/orders.zig");
 const Order = orders.Order;
@@ -120,6 +121,7 @@ pub const Entry = extern struct {
         /// Explode's and Eject Spin's: what `object_destroyed` was told.
         destroyed: aiexplode.Data,
         disrupted: aiorders.DisruptedData,
+        launch: launch.Data,
     };
 
     comptime {
@@ -156,6 +158,7 @@ pub const State = extern union {
     eject: aieject.State,
     scoop_up: tractor.State,
     disrupted: aiorders.DisruptedState,
+    launch: launch.State,
 
     comptime {
         assert(@sizeOf(State) == 0x90);
@@ -470,6 +473,7 @@ fn runInit(ctx: Context, index: u16, info: orders.Info) void {
         .scoop_up => tractor.scoopUpInit(ctx, index),
         .fight => aifight.init(ctx, index),
         .disrupted => aiorders.disruptedInit(ctx, index),
+        .launch => launch.init(ctx, index),
         else => {},
     }
 }
@@ -497,6 +501,7 @@ fn runUpdate(ctx: Context, index: u16, info: orders.Info) void {
         .disrupted => aiorders.disrupted(ctx, index),
         .launch_missile => aiorders.launchMissile(ctx, index),
         .unnamed_3 => aiorders.launchJackHammer(ctx, index),
+        .launch => launch.update(ctx, index),
         else => {},
     }
 }

@@ -223,6 +223,15 @@ view-tables: ## Re-derive the camera's views, the string naming each and its fla
 	$(ROOT)/zig-out/bin/tablegen views $(PAYLOAD) $(VIEW_TABLES)
 	$(ZIG) fmt $(VIEW_TABLES)
 
+OBJECTIVE_TABLES := $(ROOT)/src/engine/game/hud/objectives.zig
+
+.PHONY: objective-tables
+objective-tables: ## Re-derive the strings that name each mission's objectives from the payload executable
+	@test -f $(PAYLOAD) || { echo "missing $(PAYLOAD), the game executable with its code readable" >&2; exit 1; }
+	$(ZIG) build tablegen
+	$(ROOT)/zig-out/bin/tablegen objectives $(PAYLOAD) $(OBJECTIVE_TABLES)
+	$(ZIG) fmt $(OBJECTIVE_TABLES)
+
 SOURCE_MAP     := $(ROOT)/src/engine/sources.zig
 PAYLOAD_STRINGS := $(GHIDRA_EXPORT_DIR)/game/LANCER.EXE/strings.tsv
 

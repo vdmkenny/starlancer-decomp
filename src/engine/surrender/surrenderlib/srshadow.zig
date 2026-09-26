@@ -220,6 +220,14 @@ pub fn sunward(lights: []const srlight.Light) ?Vector {
     return null;
 }
 
+/// Whether a light of `lights` that casts shadows reaches `object`, by the two's light masks.
+fn shadowedBy(lights: []const srlight.Light, object: *const srapiext.MeshObject) bool {
+    for (lights) |light| {
+        if (light.shadowed and light.reaches(object.light_mask)) return true;
+    }
+    return false;
+}
+
 /// Whether `object` casts: a lit mesh, shown and of some size.
 pub fn casts(object: *const srapiext.MeshObject) bool {
     return !object.flags.hidden and object.scale != 0 and object.flags.lit and object.levels.len > 0;
@@ -252,7 +260,9 @@ const into = struct {
 /// The frame's shadows: the boxes `settings` ask for, along the first light of `lights` that
 /// casts shadows, and the triangles of each caster that can reach one of them: the world's layer,
 /// `unseen`, which casts without being drawn, and the lit meshes of `overlay`, the cockpit's
-/// parts. Null where no light casts shadows.
+/// parts. A mesh that keeps out every light casting shadows by its light mask casts none, as the
+/// sun does not light it: the Reliant's hangar, whose walls keep the sun out, leaves a ship
+/// within it lit as in the original. Null where no light casts shadows.
 pub fn gather(
     arena: Allocator,
     context: srapi.Context,
@@ -266,6 +276,7 @@ pub fn gather(
     var casters: Casters = .{
         .arena = arena,
         .context = context,
+        .lights = lights,
         .cascades = fit(context, toward, settings),
         .cockpit = if (settings.cockpit) fitCockpit(context, toward, overlay, settings.texels) else null,
     };
@@ -285,6 +296,8 @@ pub fn gather(
 const Casters = struct {
     arena: Allocator,
     context: srapi.Context,
+    /// The frame's lights, of which those that cast shadows decide what casts.
+    lights: []const srlight.Light,
     cascades: [cascade_count]Box,
     cockpit: ?Box,
     corners: std.ArrayList(Corner) = .empty,
@@ -305,7 +318,7 @@ const Casters = struct {
     /// takes them on where it goes into the same maps. An object its portal clips casts only what
     /// the portal keeps of it, as it is drawn.
     fn add(casters: *Casters, object: *const srapiext.MeshObject, allowed: Maps) Allocator.Error!void {
-        if (!casts(object)) return;
+        if (!casts(object) or !shadowedBy(casters.lights, object)) return;
         const context = casters.context;
         const relative = context.view(object.position);
         const reached = casters.reachedBy(relative, object.radius * object.scale).intersectWith(allowed);
@@ -513,6 +526,15 @@ test gather {
     const clear = (try gather(arena, context, &lights, &world, &.{}, &.{}, testing.settings)).?;
     try std.testing.expectEqual(0, clear.indices.len);
     try std.testing.expectEqual(0, clear.corners.len);
+
+    // A mesh whose light mask keeps the shadowed light out casts nothing.
+    square.surfaces[0].material.blend[0] = .off;
+    ahead.alpha_shadow = false;
+    const casting = (try gather(arena, context, &lights, &world, &.{}, &.{}, testing.settings)).?;
+    try std.testing.expectEqual(6, casting.indices.len);
+    ahead.light_mask = lights[0].mask;
+    const kept_out = (try gather(arena, context, &lights, &world, &.{}, &.{}, testing.settings)).?;
+    try std.testing.expectEqual(0, kept_out.indices.len);
 }
 
 test "a portal cuts a caster's shadow" {

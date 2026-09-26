@@ -352,6 +352,9 @@ pub const Slot = struct {
     /// Where its root's frame has it drawn (`objects.frameTree`), which stays put between the
     /// steps that move it.
     drawn: objects.Model.Local = .{},
+    /// The node it rides while it launches (`launch.State.node`, which the game keeps as the
+    /// node's address); null for none.
+    riding: ?objects.NodeOf = null,
     /// Its stack of orders, the current one first, `GameObject.order_count` of them
     /// (`GameObject.orders`), which the game allocates with the object's first order.
     orders: [aigeneric.max_stack]aigeneric.Entry = @splat(std.mem.zeroes(aigeneric.Entry)),
@@ -481,9 +484,11 @@ pub const Objects = struct {
     /// `0x005185AC`: the tick at which `aigeneric.ordersUpdate` next clears what every object has
     /// lately taken.
     damage_cleared_at: u32 = 0,
-    /// `mission_number` (`0x00562DC8`): the mission being played, by which `create_object` and
-    /// `mission_ship_create` give the player's wing the `t_` twins of the player's ships from
-    /// `twins_from_mission` on.
+    /// `mission_number` (`0x00562DC8`): the number of the mission being played, from 1, or 0 for
+    /// OpenReliant's mission 0. A few of the game's rules single a mission out by it:
+    /// `create_object` and `mission_ship_create` give the player's wing the `t_` twins of the
+    /// player's ships from `twins_from_mission` on, the turrets launch their missiles sooner in
+    /// mission 28, and the launch's caption and the objectives go by it.
     mission_number: u16 = 0,
     /// `mission25_second_part` (`0x00587CDC`): whether mission 25's first part is won and its
     /// second is played, before which the player flies a Kamov.

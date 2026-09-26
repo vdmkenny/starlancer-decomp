@@ -990,11 +990,20 @@ pub const Player = struct {
     ending: @import("game/main.zig").Ending = .playing,
     /// What the mission's scene shows (`0x00587CD4`).
     showing: @import("game/main.zig").Showing = .everything,
+    /// `player_carrier` (`0x0057E05C`): the ship the player's ship launched from, which the
+    /// launch's cutaway leaves out, and none from the mission's start until a launch names it.
+    carrier: ?u16 = null,
+    /// The cutaway the player's launch from the Reliant shows.
+    cutaway: @import("game/launch/reliant.zig").Cutaway = .none,
+    /// What the radio leaves unsaid, as a mission's script asks: the enemy's taunts
+    /// (`DisableTaunts`, `0x00529CB4`), and the remarks the game makes by itself, on a kill, a ship
+    /// lost, a missile coming or a launch (`DisableGenericComms`, `0x00529538`). The radio's lines,
+    /// which read them, are not ported yet ([#48](https://github.com/vdmkenny/openreliant/issues/48)).
+    /// A mission's start leaves them as the one before set them.
+    taunts_disabled: bool = false,
+    generic_comms_disabled: bool = false,
     /// The mission's odds of how the pilot fares after ejecting.
     rescue_odds: @import("game/aieject.zig").RescueOdds = .{},
-    /// `mission_number` (`0x00562DC8`): the number of the mission being flown, from 1; 0 where
-    /// none is, as in the sandbox. A few of the game's rules single a mission out by it.
-    mission: u8 = 0,
     /// The pilot's kills over the whole campaign.
     kills: Kills = .{},
 
@@ -1400,7 +1409,8 @@ const gone_pause = 500;
 /// A cloaked ship uncloaks instead (`setCloak`). A launch opens the missile display and holds it
 /// open, Betty says so where the armed type has run out, and the display counts one off.
 ///
-/// Not ported: the Kamov of mission 25 letting the craft it carries go instead, and uncloaking;
+/// Not ported: the Kamov of mission 25 letting the craft it carries go instead
+/// ([#305](https://github.com/vdmkenny/openreliant/issues/305)), and uncloaking;
 /// and in a multiplayer game, the missile being a power-up, and launching from under the cloak.
 pub fn launchMissile(world: gameobj.World, index: u16) void {
     const all = world.objects;

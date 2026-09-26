@@ -11,6 +11,7 @@
 //!     tablegen orders <LANCER.EXE> <output.zig>
 //!     tablegen maneuvers <LANCER.EXE> <output.zig>
 //!     tablegen views <LANCER.EXE> <output.zig>
+//!     tablegen objectives <LANCER.EXE> <output.zig>
 //!     tablegen sequences <LANCER.EXE> <output.zig>
 //!     tablegen sources <LANCER.EXE> <disassembly.asm> <strings.tsv> <output.zig>
 //!
@@ -42,6 +43,8 @@
 //!
 //! `views`: the camera's views, with the string that names each and its two flags.
 //!
+//! `objectives`: the strings that name each mission's objectives.
+//!
 //! `sequences`: how each capital ship type that splits in two as its hull is destroyed does so.
 //!
 //! `sources`: the source files the payload was compiled from, in link order, and the code known to
@@ -70,6 +73,7 @@ const orders = @import("orders.zig");
 const sources = @import("sources.zig");
 const sequences = @import("sequences.zig");
 const views = @import("views.zig");
+const objectives = @import("objectives.zig");
 const x86 = @import("x86.zig");
 const zig_text = @import("zig_text.zig");
 
@@ -98,6 +102,7 @@ const usage =
     \\       tablegen orders <LANCER.EXE> <output.zig>
     \\       tablegen maneuvers <LANCER.EXE> <output.zig>
     \\       tablegen views <LANCER.EXE> <output.zig>
+    \\       tablegen objectives <LANCER.EXE> <output.zig>
     \\       tablegen sequences <LANCER.EXE> <output.zig>
     \\       tablegen sources <LANCER.EXE> <disassembly.asm> <strings.tsv> <output.zig>
     \\
@@ -115,6 +120,7 @@ const Mode = union(enum) {
     orders: struct { binary: []const u8, output: []const u8 },
     maneuvers: struct { binary: []const u8, output: []const u8 },
     views: struct { binary: []const u8, output: []const u8 },
+    objectives: struct { binary: []const u8, output: []const u8 },
     sequences: struct { binary: []const u8, output: []const u8 },
     sources: struct { binary: []const u8, listing: []const u8, strings: []const u8, output: []const u8 },
 
@@ -178,6 +184,7 @@ pub fn main(init: std.process.Init) !u8 {
         .orders => |paths| orderTable(init, arena, paths),
         .maneuvers => |paths| maneuverTable(init, arena, paths),
         .views => |paths| viewTable(init, arena, paths),
+        .objectives => |paths| objectiveTable(init, arena, paths),
         .sequences => |paths| sequenceTable(init, arena, paths),
         .sources => |paths| sourceMap(init, arena, paths),
     };
@@ -230,6 +237,13 @@ fn controlTable(init: std.process.Init, arena: std.mem.Allocator, paths: @FieldT
     const bindings = try controls.read(arena, try loadBinary(init, arena, paths.binary));
     try writeOutput(init, paths.output, controls.emit, .{bindings});
     std.debug.print("{d} actions -> {s}\n", .{ bindings.len, paths.output });
+    return 0;
+}
+
+fn objectiveTable(init: std.process.Init, arena: std.mem.Allocator, paths: @FieldType(Mode, "objectives")) !u8 {
+    const rows = try objectives.read(arena, try loadBinary(init, arena, paths.binary));
+    try writeOutput(init, paths.output, objectives.emit, .{rows});
+    std.debug.print("{d} rows of objectives -> {s}\n", .{ rows.len, paths.output });
     return 0;
 }
 
@@ -432,6 +446,7 @@ test {
     _ = sequences;
     _ = sources;
     _ = views;
+    _ = objectives;
     _ = x86;
     _ = zig_text;
 }

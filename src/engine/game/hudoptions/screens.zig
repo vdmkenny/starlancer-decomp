@@ -256,7 +256,7 @@ pub const Video = struct {
 
     /// `pause_video_enter` (`0x0048F230`).
     pub fn enter(video: *Video, settings: Settings) void {
-        video.* = .{ .kept_view = settings.view.*, .kept_brightness = settings.brightness.* };
+        video.* = .{ .kept_view = settings.camera.setting, .kept_brightness = settings.brightness.* };
     }
 
     /// First the brightness's knob, where held, follows the pointer, or, with no button down, is
@@ -268,7 +268,7 @@ pub const Video = struct {
         } else if (video.held) {
             settings.brightness.* = brightness.valueAt(context.ui, context.pointer.at[0]);
         }
-        const arrows = view.items(viewName(settings.view.*));
+        const arrows = view.items(viewName(settings.camera.setting));
         const items: std.EnumArray(Choice, Item) = .init(.{
             .ok = buttons.ok,
             .restart = buttons.restart,
@@ -291,8 +291,8 @@ pub const Video = struct {
                 .reset_defaults => set(settings, .cockpit, 1),
                 .cancel_changes => set(settings, video.kept_view, video.kept_brightness),
                 .brightness_knob => video.held = true,
-                .view_back => set(settings, stepped(settings.view.*, Selector.step(.back)), settings.brightness.*),
-                .view_forward => set(settings, stepped(settings.view.*, Selector.step(.forward)), settings.brightness.*),
+                .view_back => set(settings, stepped(settings.camera.setting, Selector.step(.back)), settings.brightness.*),
+                .view_forward => set(settings, stepped(settings.camera.setting, Selector.step(.forward)), settings.brightness.*),
                 else => {},
             }
         }
@@ -303,12 +303,12 @@ pub const Video = struct {
     /// `[Device]`.
     pub fn leave(_: *Video, settings: Settings) Allocator.Error!void {
         try settings.file.writeInt(section, gamma_key, menu.round(settings.brightness.* * gamma_scale));
-        try settings.file.writeInt(section, view_key, @intFromEnum(settings.view.*));
+        try settings.file.writeInt(section, view_key, @intFromEnum(settings.camera.setting));
     }
 
     /// The view setting and the brightness, the camera's cockpit mode following the setting.
     fn set(settings: Settings, setting: CockpitSetting, level: f32) void {
-        settings.view.* = setting;
+        settings.camera.setting = setting;
         settings.camera.cockpit_mode = setting.mode();
         settings.brightness.* = level;
     }

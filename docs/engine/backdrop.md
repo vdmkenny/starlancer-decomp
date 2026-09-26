@@ -38,7 +38,10 @@ A script picks the nebula with `SetEnvironmentFXNebula` (0 to 6), which takes ef
 | 5 | `neb06` | 0.92, 0.66, 0.33 |
 | 6 | `neb07` | 0, 1, 1 |
 
-Nebula 0 is shown until a script picks another.
+Nebula 0 is shown until a script picks another. The nebula asked for (`nebula_requested`,
+`0x0058A6B8`) stays from one mission to the next, as does the one shown. OpenReliant keeps the
+request with the space (`environfx.Environment`) and shows it on `UpdateEnvironmentFXState`; the
+jumps that apply it are not ported yet.
 
 ## Stars
 

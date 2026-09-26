@@ -647,7 +647,11 @@ The display's panels are windows, fifteen records 40 bytes apart from `0x00501D3
 phase (`+0x00`), where it stands as a fraction of the screen across and down (`+0x04`, `+0x08`),
 the pieces of its frame (`+0x0C` their count, from `+0x0E` their numbers), the ticks left before it
 closes (`+0x18`), the ticks it stays (`+0x1C`), how far it has opened (`+0x20`) and whether it is
-held open (`+0x24`).
+held open (`+0x24`). A mission's script opens a window with `OpenInstrument` (command `0x40`),
+held open, and closes it with `CloseInstrument` (`0x41`); opening the objectives closes the wing
+status window where it is up, and opening the radio's menu starts it afresh (`comms_menu_run`, not
+ported, [#99](https://github.com/vdmkenny/openreliant/issues/99)). **Unknown:** the byte after the
+hold (`+0x25`), which both clear.
 
 | Window | Place | Stays | Shows |
 | --- | --- | --- | --- |
@@ -860,6 +864,40 @@ colour, while `hit_shake` is above zero, each row moves right by a random share 
 
 **Improvement:** OpenReliant writes the ball's pixels into an image each frame, in the same way, and
 draws the image with the rest of the display, so it scales with it.
+
+## The launch's date
+
+From the drop of the player's launch from the Reliant to its end ([Launches](launch.md#the-date)),
+`hud_draw` types out the date of the mission being flown (`0x00484601`), in every view: the language
+string of the mission's date from the table at `0x005023D6`, which holds the dates of missions 1 to
+28 one after another from string 978, June 24, 2160, and nothing for the others. It stands at the
+foot of the screen, 50 from the left and 30 up, in the display's font and colour. A letter more
+shows each time the game's ticks pass the time kept at `0x0057BF44`, which then moves 8 on, the
+count kept at `0x005799E0`, and a cursor, `_`, follows the letters until the whole date shows, a
+letter's time after its last. `hud_init` clears it, and the launch's start and end set and clear the
+flag at `0x00569934` that shows it.
+
+## The objectives
+
+Each mission has ten objectives (`mission_objectives`, `0x00504120`, four bytes each): a state and
+the language string that names it, or -1 for none. Missions 1 to 35 have a row each, and mission 25's
+second part the row after them; the display reads the row of the mission being flown. As
+`hud_init` readies the display for a mission (`objectives_reset`, `0x00499180`), the first objective
+of every row becomes the current one, each other with a name is listed, and the window shows the
+first (`objectives_shown`, `0x0056997E`):
+
+| State | Shown |
+|---|---|
+| 0 | Not at all: OBJECTIVES WINDOW passes it over as it pages, and with every objective so the window says "No current objectives." |
+| 1 | As an objective |
+| 2 | As the current objective |
+
+A mission's script sets an objective's state with `SetObjective` (command `0x43`), for missions
+below 36; an objective made current becomes the one the window shows. The table's names,
+[`hud/objectives.zig`](../../src/engine/game/hud/objectives.zig), `make objective-tables` derives
+from the executable. **Fix:** the game writes an objective past the ten into the next mission's row,
+and mission 0's before the table; OpenReliant writes none. What the window shows is not ported yet
+([#98](https://github.com/vdmkenny/openreliant/issues/98)).
 
 ## Turning it off
 

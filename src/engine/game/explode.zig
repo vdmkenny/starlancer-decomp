@@ -1486,7 +1486,7 @@ test ComponentLoss {
     try std.testing.expectEqual(.capital_ship, ComponentLoss.of(.badanov));
     // A type under another number has the routine of the type it takes its stats from.
     try std.testing.expectEqual(.capital_ship, ComponentLoss.of(@enumFromInt(0xDB)));
-    try std.testing.expectEqual(.ulysses, ComponentLoss.of(@enumFromInt(0x16)));
+    try std.testing.expectEqual(.ulysses, ComponentLoss.of(.ulysses));
     try std.testing.expectEqual(null, ComponentLoss.of(.sabre));
     try std.testing.expectEqual(null, ComponentLoss.of(@enumFromInt(0x1234)));
 }

@@ -23,12 +23,12 @@ pub const Place = math.Place;
 
 // --- Projection ---------------------------------------------------------------------------------
 
-/// The factors every view but `View.wide` projects with (`sr_set_projection`): the screen spans
-/// 5/6 of a view unit either side of the middle across and 5/8 up and down, square on a 4:3 screen:
-/// about 80 degrees across and 64 down.
+/// The factors every view but `View.launch_bay` projects with (`sr_set_projection`): the screen
+/// spans 5/6 of a view unit either side of the middle across and 5/8 up and down, square on a 4:3
+/// screen: about 80 degrees across and 64 down.
 pub const factors = [2]f32{ 0.6, 0.8 };
 
-/// `View.wide` projects wider, about 110 degrees across.
+/// `View.launch_bay` projects wider, about 110 degrees across, over the whole screen.
 pub const wide_factors = [2]f32{ 0.35, 0.467 };
 
 /// The tenth of a pixel `sr_set_projection` takes off the screen's size before it scales it
@@ -64,8 +64,15 @@ pub const View = enum(u8) {
     chase = 4,
     /// The chase view again, under a number of its own.
     chase_too = 0x1E,
-    /// A view that projects wider than the rest (`wide_factors`). **Unknown:** what it shows.
-    wide = 0x20,
+    /// The first of a launch's three cutaways (`launch_reliant_run`), from inside the carrier's
+    /// bay beside the ship, which projects wider than the rest (`wide_factors`) and tilts down
+    /// after the ship as it drops out.
+    launch_bay = 0x20,
+    /// The second: from far below the ship, looking up at it as it drops out.
+    launch_below = 0x21,
+    /// The third: from beside and below the carrier, which the view shows whole, looking at the
+    /// ship as it drops out.
+    launch_aside = 0x22,
     /// Around the player's target, looking at it, steered from the keyboard.
     target = 6,
     /// Around the player's ship, likewise.
@@ -180,7 +187,7 @@ pub const CockpitSetting = enum(u32) {
     none = 2,
     _,
 
-    /// The cockpit mode a mission's launch ends in (`launch_run`, `0x0041B240`), as it switches
+    /// The cockpit mode a mission's launch ends in (`launch_reliant_run`, `0x0041B240`), as it switches
     /// the camera from the launch's cutaway to view 0: the cockpit's model for 0, the chase view
     /// for 1, and no cockpit for any other.
     pub fn mode(setting: CockpitSetting) CockpitMode {
@@ -241,6 +248,11 @@ pub const Subject = struct {
     /// Whether it is exploding, which the pod-shot view waits for.
     exploding: bool = false,
 
+    /// Where it stands and how it is turned.
+    pub fn place(subject: Subject) Place {
+        return .{ .position = subject.position, .orientation = subject.orientation };
+    }
+
     /// What the camera follows of the object in `slot`: where its root's frame has it drawn, its
     /// model's eye point and its size, and for the chase view its type, its throttle and its rates
     /// of turn.
@@ -294,6 +306,12 @@ pub const World = struct {
     cockpit: ?Cockpit.Input = null,
     /// The runtime's `rand`, which the cockpit's jitter and the shake from hits draw on.
     random: ?*libcmt.Rand = null,
+    /// Whether the player's ship has begun to drop out of its carrier's bay, which the bay view
+    /// tilts down after (`launch.dropping`).
+    dropping: bool = false,
+    /// What the mission's scene shows, which the view aside shows whole each frame; null where
+    /// there is no scene.
+    showing: ?*@import("main.zig").Showing = null,
     /// The force feedback the player's controller plays, which the shake from hits shakes too.
     forces: ?*input.force.Forces = null,
 };
@@ -307,6 +325,10 @@ pub const Camera = struct {
     /// The object the view shows (`camera_object`, `0x00539A8C`).
     object: ?u16 = null,
     cockpit_mode: CockpitMode = .open,
+    /// The options' cockpit setting (`cockpit_mode_setting`, `0x005D5A78`), which the video screen
+    /// changes: a mission's start, and the end of the player's launch, put the camera in the
+    /// cockpit mode it picks (`CockpitSetting.mode`).
+    setting: CockpitSetting = .cockpit,
     /// Set while a script holds the camera (`0x00539ACC`): the camera keys do nothing.
     locked: bool = false,
     /// How much of the screen each bar covers (`0x00539A38`), and how fast they move
@@ -389,6 +411,26 @@ pub const Camera = struct {
             .pod_shot => math.normalize(seen.position - pod.position),
             else => camera.cutaway,
         };
+        return true;
+    }
+
+    /// Switches to one of a launch's views, `view`, of `object`, locked and forced
+    /// (`camera_set_view`), placing the camera once where the view stands: the bay view beside
+    /// `seen`, the object, on its left where `even_gate` and else on its right; the view from below
+    /// under `player`, the player's ship, looking up at it; and the view aside beside and below the
+    /// object. `frame` then turns it.
+    pub fn setLaunch(camera: *Camera, view: View, object: u16, now: u32, seen: Subject, player: Subject, even_gate: bool) bool {
+        if (!camera.setView(view, object, true, true, now)) return false;
+        switch (view) {
+            .launch_bay => {
+                const across: Vector = .{ if (even_gate) -bay_offset[0] else bay_offset[0], bay_offset[1], bay_offset[2] };
+                camera.place.position = seen.place().point(across);
+            },
+            // Looking at the player's ship (`camera_look_at_player`, `0x00461D00`).
+            .launch_below => camera.place = lookingAt(player.place().point(below_offset), player.position),
+            .launch_aside => camera.place.position = seen.place().point(aside_offset),
+            else => {},
+        }
         return true;
     }
 
@@ -524,6 +566,19 @@ pub const Camera = struct {
                 const since = if (world.player.exploding) camera.shown(world) else 0;
                 camera.place = podShot(camera.cutaway, world.player.position, world.object.position, since);
             },
+            .launch_bay => {
+                // Until the ship drops, the view holds its time at nothing.
+                if (!world.dropping) camera.switched = world.now;
+                const since = if (world.dropping) camera.shown(world) else 0;
+                camera.place.orientation = math.product(world.player.orientation, math.fromAngles(bay_pitch - since * bay_tilt, 0, 0));
+            },
+            // `camera_ease_to_player` (`0x00461C60`) eases the view's angles toward looking at the
+            // player's ship by a share, which every call gives as all the way: the look itself.
+            .launch_below => camera.place = lookingAt(camera.place.position, world.player.position),
+            .launch_aside => {
+                if (world.showing) |showing| showing.* = .everything;
+                camera.place = lookingAt(camera.place.position, world.player.position);
+            },
             .watch => camera.place = lookingAt(camera.place.position, world.object.position),
             .watch_marker => if (world.marker) |marker| {
                 camera.place = lookingAt(camera.place.position, marker);
@@ -550,10 +605,11 @@ pub const Camera = struct {
         return null;
     }
 
-    /// The projection for the view and the bars on a screen of `width` by `height`, unstretched.
+    /// The projection for the view and the bars on a screen of `width` by `height`, unstretched:
+    /// the bay view's wide over the whole screen, whatever the bars (`camera_frame`).
     pub fn projection(camera: Camera, width: u32, height: u32) srapi.Projection {
-        const base = if (camera.view == .wide) wide_factors else factors;
-        return .init(width, height, .{ 0, camera.bars, 1, 1 - camera.bars }, unstretched(width, height, base));
+        if (camera.view == .launch_bay) return .init(width, height, .{ 0, 0, 1, 1 }, unstretched(width, height, wide_factors));
+        return .init(width, height, .{ 0, camera.bars, 1, 1 - camera.bars }, unstretched(width, height, factors));
     }
 };
 
@@ -985,6 +1041,23 @@ test pullBack {
     try std.testing.expect(later.position[0] != 0);
 }
 
+// --- The launch ---------------------------------------------------------------------------------
+
+/// Where the launch's views stand, in the frame of what they watch as they are switched to
+/// (`camera_set_view`): the bay view 750 to the side of its ship, 600 above it and 300 behind
+/// (`0x0045F6BF`), on the left for a gate of even number; the view from below 600 to the right of
+/// the player's ship, 10000 below it and 100 ahead (`0x0045F737`); and the view aside 1700 to the
+/// left of its ship and 6000 below (`0x0045F7B0`).
+const bay_offset: Vector = .{ 750, -600, -300 };
+const below_offset: Vector = .{ 600, 10000, 100 };
+const aside_offset: Vector = .{ -1700, 6000, 0 };
+
+/// How far down the bay view looks, turned about the player's ship's X axis from its nose
+/// (`0x004DC760`), and how much further it tilts a tick once the ship drops (`0x004DC764`).
+/// **Improvement:** 54 degrees, which the game rounds to 0.942478.
+const bay_pitch: f32 = std.math.degreesToRadians(-54.0);
+const bay_tilt: f32 = 0.0007;
+
 // --- The ejection -------------------------------------------------------------------------------
 
 /// How far out to its object's right the eject view stands (`0x0045F479`).
@@ -1072,6 +1145,49 @@ test "Camera.setCutaway" {
     try std.testing.expect(!camera.setView(.chase, 0, false, false, 40));
 }
 
+test "Camera.setLaunch" {
+    var camera: Camera = .{};
+    // The ship faces along the world's X axis, its own left along +Z.
+    const ship: Subject = .{ .position = .{ 0, 0, 1000 }, .orientation = math.rotation(.y, std.math.pi / 2.0) };
+    // The bay view stands beside it, on the left for a gate of even number, above and behind.
+    try std.testing.expect(camera.setLaunch(.launch_bay, 0, 10, ship, ship, true));
+    try expectVector(.{ -300, -600, 1750 }, camera.place.position);
+    try std.testing.expect(camera.locked);
+    try std.testing.expect(camera.setLaunch(.launch_bay, 0, 10, ship, ship, false));
+    try expectVector(.{ -300, -600, 250 }, camera.place.position);
+    // The view from below stands far under the player's ship, looking up at it.
+    try std.testing.expect(camera.setLaunch(.launch_below, 0, 20, ship, ship, true));
+    try expectVector(.{ 100, 10000, 400 }, camera.place.position);
+    try expectVector(math.normalize(ship.position - camera.place.position), math.forward(camera.place.orientation));
+    // The view aside stands to the ship's left and below it.
+    try std.testing.expect(camera.setLaunch(.launch_aside, 0, 30, ship, ship, true));
+    try expectVector(.{ 0, 6000, 2700 }, camera.place.position);
+}
+
+test "the launch's views follow the ship" {
+    var camera: Camera = .{};
+    var ship: Subject = .{ .position = .{ 0, 0, 1000 }, .orientation = math.identity };
+    _ = camera.setLaunch(.launch_bay, 0, 10, ship, ship, true);
+    // Until the ship drops, the bay view looks 54 degrees down from its nose, holding its time.
+    _ = camera.frame(.{ .object = ship, .player = ship, .ticks = 1, .now = 50 });
+    try std.testing.expectEqual(50, camera.switched);
+    const looking = math.forward(camera.place.orientation);
+    try std.testing.expectApproxEqAbs(@sin(std.math.degreesToRadians(54.0)), looking[1], 1e-6);
+    // Once it drops, the view tilts further down after it.
+    _ = camera.frame(.{ .object = ship, .player = ship, .ticks = 1, .now = 150, .dropping = true });
+    try std.testing.expect(math.forward(camera.place.orientation)[1] > looking[1]);
+    try std.testing.expectEqual(50, camera.switched);
+
+    // The views from below and aside keep looking at the ship as it goes, the view aside showing
+    // the whole scene.
+    var showing: @import("main.zig").Showing = .launch;
+    _ = camera.setLaunch(.launch_aside, 0, 200, ship, ship, true);
+    ship.position = .{ 0, 3000, 1000 };
+    _ = camera.frame(.{ .object = ship, .player = ship, .ticks = 1, .now = 210, .showing = &showing });
+    try expectVector(math.normalize(ship.position - camera.place.position), math.forward(camera.place.orientation));
+    try std.testing.expectEqual(.everything, showing);
+}
+
 test "the views that move with time go on between ticks" {
     var camera: Camera = .{};
     const ship: Subject = .{ .position = .{ 0, 0, 100 }, .orientation = math.identity };
@@ -1132,8 +1248,12 @@ test unstretched {
     try std.testing.expectApproxEqAbs(sixteen_nine.scale[0], sixteen_nine.scale[1], 1e-3);
     try std.testing.expect(sixteen_nine.bounds[2] > 1.1);
     try std.testing.expectApproxEqAbs(0.625, sixteen_nine.bounds[3], 1e-4);
-    const wide: Camera = .{ .view = .wide };
-    try std.testing.expect(wide.projection(1024, 768).scale[1] < four_three[1] * 768);
+    // The bay view projects wider, over the whole screen whatever the bars.
+    const wide: Camera = .{ .view = .launch_bay, .bars = letterbox };
+    const bay = wide.projection(1024, 768);
+    try std.testing.expect(bay.scale[1] < four_three[1] * 768);
+    try std.testing.expectEqual(0, bay.viewport[1]);
+    try std.testing.expectEqual(768, bay.viewport[3]);
 }
 
 test Camera {

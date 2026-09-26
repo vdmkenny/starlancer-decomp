@@ -146,7 +146,10 @@ flare and light sprites, 5 cargo and fuel pods. Kind 3 is a gun's muzzle: an obj
 for each, of the type at `0x64`, and its muzzle flash is drawn there. Kind 7 is where a spinning
 gun's spent cases fly from ([Guns](../engine/guns.md#particles-and-bursts)). Kind 6 is a cockpit's
 eject point: the flash of a pilot's ejection goes off at the last, and the pod shoots out along its
-Z axis ([Ejection](../engine/ejection.md#the-pod)). **Unknown:** kinds 2, 8 and 9.
+Z axis ([Ejection](../engine/ejection.md#the-pod)). Kind 8 is a launch point, where a ship stands
+to launch from the model, turned as the point is: a carrier's torpedo tubes and the Reliant's hangar
+hold them ([Launches](../engine/launch.md#launch-points)). Kind 2 is an engine's glow
+([Rendering](../engine/rendering.md#engine-glows)). **Unknown:** kind 9.
 
 For kinds 1 and 5 the engine mounts the model as an object of its own, hanging from the part's
 node, whose components join the owner's.

@@ -27,6 +27,7 @@ const aigeneric = @import("aigeneric.zig");
 const create = @import("create.zig");
 const gameobj = @import("gameobj.zig");
 const guns = @import("guns.zig");
+const launch = @import("launch.zig");
 const cloak = @import("cloak.zig");
 pub const lock = @import("main/lock.zig");
 const missiles = @import("missiles.zig");
@@ -87,7 +88,8 @@ pub const Ending = enum(u8) {
 /// What the mission's scene shows (`0x00587CD4`), which a mission's start sets to `everything`.
 pub const Showing = enum(u8) {
     everything = 0,
-    /// A launch's cutaway, which hides the ship the player launches from.
+    /// A launch's cutaway (`launch.reliant`), which leaves out the ship the player launches from
+    /// (`input.Player.carrier`), its bay seen from within.
     launch = 2,
     /// **Unknown:** what it shows. The landing orders set it (`0x0040EF55`, `0x0040F9A7`), and
     /// `mission_frame` passes over the mission's events and `0x0045A570` while it is so.
@@ -97,6 +99,28 @@ pub const Showing = enum(u8) {
     /// destroyed, with neither the camera's watch nor the pilot counted killed on the way.
     ejection = 4,
     _,
+};
+
+/// What the mission's scene shows, as the player's state has it: `Showing`, and the ship the
+/// player launched from, which a launch's cutaway leaves out.
+pub const Shown = struct {
+    showing: Showing = .everything,
+    carrier: ?u16 = null,
+
+    pub fn of(player: *const input.Player) Shown {
+        return .{ .showing = player.showing, .carrier = player.carrier };
+    }
+
+    /// Whether the scene leaves out the object in slot `index` of `all` (`mission_frame`,
+    /// `0x00492CEF`): a launch's cutaway the ship the player launches from, and the end of the
+    /// player's ejection all but the player's pod and the cutaway slot's ship.
+    pub fn leavesOut(shown: Shown, all: *const create.Objects, index: u16) bool {
+        return switch (shown.showing) {
+            .launch => index == shown.carrier,
+            .ejection => index != all.player and index != create.cutaway_slot,
+            else => false,
+        };
+    }
 };
 
 /// The game's ticks a second: `tick_timer` (`0x004827C0`) runs every hundredth of a second.
@@ -226,7 +250,7 @@ pub const Frame = struct {
     /// its shadow.
     seat: ?u16 = null,
     /// What the mission's scene shows.
-    showing: Showing = .everything,
+    shown: Shown = .{},
     space: *backdrop.Backdrop,
     sky: *nebula.Sky,
     view: camera.View,
@@ -290,9 +314,8 @@ pub const Pausing = struct {
     menu: *hudoptions.PauseMenu,
     /// The archive the menu's fonts come from.
     archive: bigfile.Hog,
-    /// The options' cockpit setting, and the camera, which resuming switches to view 0, following
-    /// the player's ship's slot, when the setting changed while paused.
-    view_setting: *const camera.CockpitSetting,
+    /// The camera, which resuming switches to view 0, following the player's ship's slot, when its
+    /// cockpit setting (`camera.Camera.setting`) changed while paused.
     camera: *camera.Camera,
     player: *const u16,
 };
@@ -318,7 +341,7 @@ pub fn pause(pausing: Pausing, on: bool) !void {
             sound.pauseAll();
             try menu.open(pausing.gpa, pausing.archive);
         }
-        menu.view_setting = pausing.view_setting.*;
+        menu.view_setting = pausing.camera.setting;
         return;
     }
     if (clock.paused) {
@@ -326,7 +349,7 @@ pub fn pause(pausing: Pausing, on: bool) !void {
         sound3d.pause(sound, false);
         sound.resumeAll();
         menu.close();
-        if (menu.view_setting != pausing.view_setting.*) {
+        if (menu.view_setting != pausing.camera.setting) {
             _ = pausing.camera.setView(.cockpit, pausing.player.*, false, true, clock.viewTime());
         }
     }
@@ -421,7 +444,19 @@ pub fn controlsFrame(controls: Controls) void {
     const subject = camera.Subject.of(slot);
     const seen = if (view.object) |object| camera.Subject.of(&all.slots[object]) else subject;
     const marker = if (world.explosions) |explosions| if (explosions.marker) |left| left.position else null else null;
-    if (view.frame(.{ .object = seen, .player = subject, .ticks = ticks, .now = at, .ahead = objects.pastTick(clock, controls.smooth_motion), .marker = marker, .cockpit = cockpit_input, .random = controls.random, .forces = controls.forces })) |next| {
+    if (view.frame(.{
+        .object = seen,
+        .player = subject,
+        .ticks = ticks,
+        .now = at,
+        .ahead = objects.pastTick(clock, controls.smooth_motion),
+        .marker = marker,
+        .cockpit = cockpit_input,
+        .random = controls.random,
+        .forces = controls.forces,
+        .dropping = launch.dropping(all, all.player),
+        .showing = &world.player.showing,
+    })) |next| {
         _ = view.setView(next, all.player, false, true, at);
     }
     slot.object.flags.hidden = view.inside(all.player);
@@ -476,6 +511,7 @@ pub fn missionFrame(orders: aigeneric.Context, timing: objects.Timing, loaded: ?
     if (orders.world.gun_particles) |pools| pools.frame(orders.clock);
     smoke.frame(orders.world);
     objectsPass(orders);
+    followCarrier(orders.world);
     if (orders.world.forces) |forces| forces.pushFrame(orders.clock.frame_start);
     orders.world.objects.exhaust.burn(orders.world);
     if (orders.world.explosions) |explosions| explosions.frame(orders.world);
@@ -485,6 +521,36 @@ pub fn missionFrame(orders: aigeneric.Context, timing: objects.Timing, loaded: ?
         if (orders.world.view.showsLock()) display.lock.frame(orders.world, &display.missiles);
     }
     return over;
+}
+
+/// `mission_frame`'s care of the ship the player launched from (`0x004932D4`): once that ship
+/// explodes, the first Yamato among the objects takes its place, where there is one.
+pub fn followCarrier(world: gameobj.World) void {
+    const all = world.objects;
+    const carrier = world.player.carrier orelse return;
+    if (carrier >= all.slots.len or !all.slots[carrier].object.flags.exploding) return;
+    for (all.slots[0..all.count], 0..) |*slot, index| {
+        if (slot.object.type != .yamato) continue;
+        world.player.carrier = @intCast(index);
+        return;
+    }
+}
+
+test followCarrier {
+    var mission: gameobj.testing.Mission = undefined;
+    try mission.init(std.testing.allocator);
+    defer mission.deinit();
+    _ = try mission.add(.predator, @splat(0));
+    const reliant = try mission.add(.reliant, @splat(0));
+    const yamato = try mission.add(.yamato, @splat(0));
+    mission.player.carrier = reliant;
+    // While the Reliant holds, it stays the ship the player launched from.
+    followCarrier(mission.world());
+    try std.testing.expectEqual(reliant, mission.player.carrier.?);
+    // Once it explodes, the Yamato takes its place.
+    mission.slot(reliant).object.flags.exploding = true;
+    followCarrier(mission.world());
+    try std.testing.expectEqual(yamato, mission.player.carrier.?);
 }
 
 /// How long the camera watches the player's ship's end, the pilot's pod picked up, and the pod
@@ -579,11 +645,11 @@ fn avoidanceScan(world: gameobj.World, index: u16) void {
 }
 
 /// `mission_frame`'s pass over the objects before the camera's frame: each live object, save
-/// stand-ins and disabled and jumping ones, has `missile_homing` cleared and is framed as far
-/// through the simulation's step as `timing` says (`objects.frameTree`), one the orders placed
-/// going on by its glide for the time past the tick, which the orders set afresh each frame; a
-/// cloaked one's frame then wobbles as its cloak changes, by the frame's tick `now`
-/// (`cloak.wobble`).
+/// stand-ins and disabled and jumping ones, has `missile_homing` cleared, stands on the node it
+/// rides where it is launching (`launch.hold`), and is framed as far through the simulation's step
+/// as `timing` says (`objects.frameTree`), one the orders placed going on by its glide for the time
+/// past the tick, which the orders set afresh each frame; a cloaked one's frame then wobbles as its
+/// cloak changes, by the frame's tick `now` (`cloak.wobble`).
 pub fn frameObjects(all: *create.Objects, timing: objects.Timing, now: i32) void {
     var walk = all.walk();
     while (walk.next()) |index| {
@@ -596,6 +662,7 @@ pub fn frameObjects(all: *create.Objects, timing: objects.Timing, now: i32) void
         const glide: ?math.Vector = if (gliding or slot.glided) slot.glide * @as(math.Vector, @splat(timing.ahead)) else null;
         slot.glided = gliding;
         slot.glide = @splat(0);
+        launch.hold(all, index);
         objects.frameTree(&object.root, if (slot.model) |*model| model else null, &slot.drawn, timing.fraction, glide);
         cloak.wobble(slot, now);
     }
@@ -612,7 +679,7 @@ pub fn drawFrame(gpa: Allocator, arena: Allocator, scene: *srcore.Scene, context
     attachments.scale = context.projection.scale[0];
     attachments.hardware = context.hardware;
     attachments.paused = frame.paused;
-    try drawObjects(gpa, scene, frame.objects, attachments, frame.seat, if (frame.explosions) |explosions| &explosions.splits else null, frame.showing);
+    try drawObjects(gpa, scene, frame.objects, attachments, frame.seat, if (frame.explosions) |explosions| &explosions.splits else null, frame.shown);
     if (frame.tractors) |tractors| try tractors.draw(gpa, scene, frame.objects);
     try missiles.draw(frame.objects, gpa, scene, attachments);
     if (frame.trails) |trails| try trails.draw(gpa, scene);
@@ -719,7 +786,7 @@ pub const DrawBudget = enum {
 /// pulsing, the Boridin breakaway's core and the Dark Reign's hat
 /// ([#238](https://github.com/vdmkenny/openreliant/issues/238)); the cutaway scenes' own rules, and
 /// the gate's tunnel, in which no object is drawn. The pass's smoke is `smoke.frame`.
-pub fn drawObjects(gpa: Allocator, scene: *srcore.Scene, all: *create.Objects, attachments: objects.View, seat: ?u16, splits: ?*const explode.split.Splits, showing: Showing) Allocator.Error!void {
+pub fn drawObjects(gpa: Allocator, scene: *srcore.Scene, all: *create.Objects, attachments: objects.View, seat: ?u16, splits: ?*const explode.split.Splits, shown: Shown) Allocator.Error!void {
     var walk = all.walk();
     while (walk.next()) |index| {
         const slot = &all.slots[index];
@@ -727,9 +794,7 @@ pub fn drawObjects(gpa: Allocator, scene: *srcore.Scene, all: *create.Objects, a
         if (object.flags.outOfFrame()) continue;
         cloak.frame(slot, attachments.frame_start);
         const model = if (slot.model) |*model| model else continue;
-        // At the end of the player's ejection only the pod and the cutaway slot's ship are drawn.
-        const left_out = showing == .ejection and index != all.player and index != create.cutaway_slot;
-        if (object.flags.hidden or left_out) {
+        if (object.flags.hidden or shown.leavesOut(all, index)) {
             if (index == seat) {
                 if (slot.cloak) |cloaking| cloak.shadeUnseen(model, cloaking.hull);
                 try model.castShadows(gpa, scene);
@@ -775,7 +840,7 @@ test "the objects are framed and drawn, save those left out" {
     try std.testing.expectEqual(0, all.slots[3].object.missile_homing);
     var scene: srcore.Scene = .{};
     defer scene.deinit(gpa);
-    try drawObjects(gpa, &scene, all, .{}, 0, null, .everything);
+    try drawObjects(gpa, &scene, all, .{}, 0, null, .{});
     // Only the fourth is drawn: its one part. The first, which the camera sits in, casts its
     // shadow without being drawn.
     try std.testing.expectEqual(1, scene.layers.get(.world).items.len);
@@ -788,10 +853,16 @@ test "the objects are framed and drawn, save those left out" {
     const seen = try create.createObject(all, &tables, model.types(), create.cutaway_slot, .predator, 0, .{ 0, 0, 500 }, &random);
     frameObjects(all, .{}, 0);
     scene.clear();
-    try drawObjects(gpa, &scene, all, .{}, null, null, .ejection);
+    try drawObjects(gpa, &scene, all, .{}, null, null, .{ .showing = .ejection });
     const drawn = scene.layers.get(.world).items;
     try std.testing.expectEqual(2, drawn.len);
     for (drawn) |item| try std.testing.expect(std.meta.eql(item.mesh.position, all.slots[0].drawn.position) or std.meta.eql(item.mesh.position, all.slots[seen].drawn.position));
+
+    // A launch's cutaway leaves out the ship the player launches from.
+    scene.clear();
+    try drawObjects(gpa, &scene, all, .{}, null, null, .{ .showing = .launch, .carrier = 3 });
+    for (scene.layers.get(.world).items) |item| try std.testing.expect(!std.meta.eql(item.mesh.position, all.slots[3].drawn.position));
+    try std.testing.expectEqual(2, scene.layers.get(.world).items.len);
 }
 
 test "an object the orders place is drawn on by its glide, for the time past the tick" {
@@ -955,7 +1026,7 @@ test "the passes draw a cloaked object through its cloak" {
     const halfway = cloak.change_ticks / 2;
     frameObjects(stage.mission.objects, .{}, halfway);
     try std.testing.expect(!std.meta.eql(math.identity, stage.slot().drawn.orientation));
-    try drawObjects(gpa, &scene, stage.mission.objects, .{ .frame_start = halfway }, null, null, .everything);
+    try drawObjects(gpa, &scene, stage.mission.objects, .{ .frame_start = halfway }, null, null, .{});
     const drawn = scene.layers.get(.world).items;
     try std.testing.expectEqual(2, drawn.len);
     try std.testing.expectEqual(&part.cloak.?.shimmer, drawn[0].mesh);
@@ -966,7 +1037,7 @@ test "the passes draw a cloaked object through its cloak" {
     scene.clear();
     cloak.frame(stage.slot(), cloak.change_ticks);
     cloak.toggle(stage.mission.world(), stage.index);
-    try drawObjects(gpa, &scene, stage.mission.objects, .{ .frame_start = 2 * cloak.change_ticks }, null, null, .everything);
+    try drawObjects(gpa, &scene, stage.mission.objects, .{ .frame_start = 2 * cloak.change_ticks }, null, null, .{});
     try std.testing.expectEqual(null, stage.slot().cloak);
     try std.testing.expectEqual(1, scene.layers.get(.world).items.len);
 }
@@ -1305,13 +1376,16 @@ const camera_marker_at: math.Vector = .{ 0, 0, -8000 };
 /// (`0x004934F0`), for the mission `image`, made in `gpa`, which the mission then owns, played as
 /// mission `number`. Returns the mission loaded for play, which the caller destroys once it ends.
 ///
-/// The loading empties the effects' pools and the missiles in flight, puts a stand-in in every
+/// The loading readies the display's objectives and the launch's caption for the mission
+/// (`hud_init`), empties the effects' pools and the missiles in flight, puts a stand-in in every
 /// object's slot (`create.Objects.reset`), and loads the Turret Flak's shell and the debris
 /// (`guns_load_shell`, `explosions_init`). Then the start:
-/// 1. ends the 3D sounds, has the mission play with everything shown and the ejected pilot always
+/// 1. ends the 3D sounds, has the mission play with everything shown, no ship the player launched
+///    from, the camera in the cockpit mode the options' setting picks and the ejected pilot always
 ///    picked up, and puts back the pilot's kills (`winmain.startMission`);
-/// 2. binds the mission and starts its script (`mission.Loaded.start`), whose start part makes the
-///    mission's first ships and gives them their orders;
+/// 2. binds the mission, whose records the orders then reach (`gameobj.World.mission`), and starts
+///    its script (`mission.Loaded.start`), whose start part makes the mission's first ships and
+///    gives them their orders, a launch among them;
 /// 3. lists the player's wing's icons (`startWing`), and makes the camera's marker in the next
 ///    slot;
 /// 4. lets go of the types no object is of any more, and loads the model of each type the mission
@@ -1319,9 +1393,6 @@ const camera_marker_at: math.Vector = .{ 0, 0, -8000 };
 /// 5. resets the frame's clock (`frame_reset`), loads the cockpit of the player's ship, and readies
 ///    the display for it as `hud_init` and the start have it: its devices fitted (`fitDevices`),
 ///    its missiles in the missile display, no missile lock, and the eject marker out.
-///
-/// A stand-in: the player's engine starts sounding, which the launch starts (`launch_run`), until
-/// the launches are ported ([#280](https://github.com/vdmkenny/openreliant/issues/280)).
 ///
 /// The start clears the keyboard's state (`0x004BD7E0`), which the next read of the keyboard fills
 /// again; OpenReliant's keeps what the device reports.
@@ -1349,6 +1420,8 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     if (world.tractors) |tractors| tractors.reset();
     if (world.flash) |lit| lit.* = .{};
     start.display.interference = .{};
+    start.display.caption = .{};
+    start.display.objectives.reset(number, all.mission25_second_part);
     if (world.countermeasures) |dropped| dropped.reset();
     all.reset(world.random);
     // The shell and the debris, counted as used so the sweep below keeps them.
@@ -1359,10 +1432,14 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     world.player.ending = .playing;
     world.player.showing = .everything;
     world.player.rescue_odds = .{};
+    world.player.carrier = null;
+    world.player.cutaway = .none;
+    if (world.camera) |view| view.cockpit_mode = view.setting.mode();
     winmain.startMission(world.player);
     all.mission_number = number;
     const loaded = try Loaded.create(gpa, image, world.random);
     errdefer loaded.destroy();
+    orders.world.mission = &loaded.bound;
     try loaded.start(orders);
 
     startWing(all);
@@ -1384,9 +1461,6 @@ pub fn startMission(gpa: Allocator, start: Start, image: []u8, number: u16) !*Lo
     fitDevices(start.display, player_type, if (player.type) |loaded_type| loaded_type.model.header.flags.cloak else false);
     start.display.missiles.build(&player.object);
     start.display.lock.reset();
-    if (player.object.created) if (world.hearing) |hearing| {
-        _ = sound3d.play(hearing.sound, hearing.scene(world), null, null, all.player, sound3d.engineSound(player.object.type), 0, .player_engines);
-    };
     return loaded;
 }
 
@@ -1422,7 +1496,7 @@ test fitDevices {
     try std.testing.expectEqual(.absent, display.devices.get(.cloak).setting);
     try std.testing.expect(!display.blind_fire_fitted);
     // A capital ship is none of the player's.
-    try std.testing.expectEqual(null, playerShip(@enumFromInt(0x0D)));
+    try std.testing.expectEqual(null, playerShip(.yamato));
 }
 
 test startMission {

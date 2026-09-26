@@ -10,7 +10,7 @@ The views the game shows and where each puts the camera: `camera.cpp`, with the 
 (width / 2 + x / z * (width - 0.1) * across, height / 2 + y / z * (height - 0.1) * down)
 ```
 
-whatever the viewport; the viewport only bounds what is drawn. Every view but one uses the factors 0.6 and 0.8: the screen spans 5/6 of a view unit either side of the middle across and 5/8 up and down, about 80 by 64 degrees, with square pixels on a 4:3 screen. View 0x20 uses 0.35 and 0.467, about 110 degrees across.
+whatever the viewport; the viewport only bounds what is drawn. Every view but one uses the factors 0.6 and 0.8: the screen spans 5/6 of a view unit either side of the middle across and 5/8 up and down, about 80 by 64 degrees, with square pixels on a 4:3 screen. View 0x20, a launch's bay, uses 0.35 and 0.467, about 110 degrees across, over the whole screen whatever the bars.
 
 The game runs in the display modes the device lists, which it keeps in `dmodes.bin`, and starts at 640x480.
 
@@ -34,6 +34,9 @@ OpenReliant keeps the factor down and chooses the factor across that keeps pixel
 | 0x1B | | From where the camera was, watching where the player's ship burst (`explode_marker`), which drifts on at a quarter of its velocity a frame | a space |
 | 0x1C | | Round the ship picking up the player's pod, closing in | a space |
 | 0x1D | | From behind the player's pod, at the Sabre that shoots it down | a space |
+| 0x20 | | From within a launch's bay, beside the ship, looking down after it as it drops ([Launches](launch.md#the-cutaways)) | a space |
+| 0x21 | | From far below a launching ship, looking up at it | a space |
+| 0x22 | | From beside and below a launching ship, looking at it, the whole scene shown | a space |
 | 0x24 | Flyby | From a point the player flies past | a space |
 
 The view table (`camera_view_table`, `0x4F72A8`) holds four bytes a view, for views 0 to `0x2B`: the language string that names the view, whether cinematic bars slide in, and whether it is from the cockpit. [`camera/views.zig`](../../src/engine/game/camera/views.zig) transcribes it; `make view-tables` derives it again. The bars slide in for views 7 to `0x27` and `0x2B`, but not the external view; views 0 to 3 are from the cockpit. The names are strings 170 to 182 of `language.dll`; string 174, Chase Camera, is none of them, the chase views and most cutaways taking 181, a single space. From the cockpit the object's flag bit 0 is set, except in the chase mode, and cleared when the view moves off it. The bars grow by 0.001 of the screen a tick to 0.1, top and bottom; a view without them clears them at once.
@@ -46,9 +49,9 @@ The view table (`camera_view_table`, `0x4F72A8`) holds four bytes a view, for vi
 | 1 | From the eye, the cockpit's model drawn over the view |
 | 2 | The chase view |
 
-The options' cockpit setting (`cockpit_mode_setting`, `0x5D5A78`), which the game keeps in its ini as `[Device] View` and reads as 0 when the ini has none, picks the mode a mission's launch ends in: 0 for mode 1, 1 for mode 2 and any other for mode 0. The launch (`launch_run`, `0x0041B240`) shows one of three cutaways, views `0x20` to `0x22`, and at its last step sets the mode and switches from the cutaway to view 0. Resuming from the pause (`game_pause`, `0x00491E20`) switches to view 0 again when the setting changed while paused.
+The options' cockpit setting (`cockpit_mode_setting`, `0x5D5A78`), which the game keeps in its ini as `[Device] View` and reads as 0 when the ini has none, picks the mode: 0 for mode 1, 1 for mode 2 and any other for mode 0. A mission's start sets the mode it picks (`mission_start`, `0x0049359E`). The Reliant's launch holds the camera in view 0 in mode 1 from its start, shows one of three cutaways, views `0x20` to `0x22`, and at its last step sets the mode the setting picks and switches from a cutaway to view 0, no longer held ([Launches](launch.md#the-reliants-launch)). Resuming from the pause (`game_pause`, `0x00491E20`) switches to view 0 again when the setting changed while paused.
 
-OpenReliant starts a ship in view 0 in the mode `--view` sets, 0 by default, as a launch ends. A ship too large for the chase mode's distance starts in the external view instead: OpenReliant flies ships the game never gives the player.
+OpenReliant keeps the setting with the camera, which `--view` sets. A ship that does not launch starts in view 0; one too large for the chase mode's distance starts in the external view instead, as OpenReliant flies ships the game never gives the player.
 
 ## Cockpit
 

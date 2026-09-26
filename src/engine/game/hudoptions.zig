@@ -52,9 +52,8 @@ pub const Settings = struct {
     sound: *hog_snd.Sound,
     /// `stdsmp.fat`, whose sound 14 tries the effects' volume.
     stdsmp: fat.Bank,
-    /// The options' cockpit setting (`cockpit_mode_setting`), and the camera whose cockpit mode
-    /// follows it.
-    view: *camera.CockpitSetting,
+    /// The camera, whose cockpit setting (`Camera.setting`) the video screen changes, its cockpit
+    /// mode following it.
     camera: *camera.Camera,
     /// The brightness (`sr + 0x15FA`), 0.5 to 2, and whether the device sets it
     /// (`sr + 0x38` bit 0), which shows its slider. OpenReliant's devices don't set it yet (#209):

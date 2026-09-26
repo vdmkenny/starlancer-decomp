@@ -48,7 +48,7 @@ needs between updates.
 | `0x02` | 2 | Target kind: 0 a ship, 1 a flight group, 2 a squad, as in the mission's [object table](../formats/dte.md) |
 | `0x04` | 2 | Target: the ship's slot, or the flight group's or squad's index; -1 for none |
 | `0x06` | 2 | Target component, or -1 for the whole ship |
-| `0x08` | 2 | A running count from `0x5185A8` while the byte at `0x5185B1` is set, otherwise zero |
+| `0x08` | 2 | A running count from `0x5185A8` while the byte at `0x5185B1` is set, as `SetAI` and `SetupLaunch` number the orders they give, otherwise zero |
 | `0x0A` | 16 | The order's own data, zero when the order is pushed |
 
 `player_controls` keeps the mouse's stick position in the first two words of its data.
@@ -78,6 +78,18 @@ them all at once when the current order gives way to clearing, so only that orde
 
 The script command `SetAI` pushes an order aimed at the ship, flight group or squad it names, on
 each ship it applies to, and `ClearAI` clears the orders of each ship that is not a player's.
+
+### Targets that name several ships
+
+`order_target_walk` (`0x00401CB0`) hands each ship an order's target names to a routine, until the
+routine says to stop: the ship itself, as the target names it; each ship of a flight group, whole;
+and each ship of a squad (`squad_walk`, `0x00401D80`): its members in turn from its first, while
+they are its own, a ship as the member names its component, a flight group's ships whole, and a
+squad's own walk. Dock, Escort, the search for a new target, the search for a pod to scoop up, the
+Dark Reign's guns and [Launch](launch.md#the-order) walk their targets so. **Fix:** the game walks a
+squad that holds itself round for ever, takes a member no record stands for as the ship at address
+zero, and stops with a fatal error at a member of a kind it does not know; OpenReliant stops once
+the walk has gone down more squads than the mission has, and passes over the member.
 
 ## Running orders
 
@@ -215,6 +227,7 @@ set from C's `rand()` when the object is created, that steps as `seed * 0x343FD 
 | Fly ship backwards (45) | Throttle -0.5, no turning. |
 | Multiplayer Control (101) | Disables the object once it has object flag `0x10000000`. |
 | Fight (105) | Fights its target by running [combat maneuvers](maneuvers.md), one after another. |
+| Launch (104) | The ship leaves its carrier, in the style the carrier's type picks ([Launches](launch.md)). |
 | Disrupted (114) | A Havoc's shockwave gives it ([Effects](effects.md#shockwaves)). On starting, sets object flag `0x8` (unpowered), keeps the tick to end at, the duration in its data (a word) after `frame_start`, takes the push in its data after that (three floats) as a knock in the ship's own frame, though the shockwave gives it in the world's, and knocks each turn rate by up to 0.05 either way at random, which the ship tumbles by. It also plays fifteen [electric rays](effects.md#electric-rays) over the ship, each from its centre out to its radius in a random direction, 90 either way, with a jitter of 0.6, flickering, dimming as they go dark, and lasting as long as the order, white (0.8, 0.8, 1) and blue (0.3, 0.5, 1) in turn. It pops past that tick, and its `exit` clears the flag. |
 | Eject (30) | The pilot leaves the ship in its cockpit, which becomes the pod, and the rest of the ship a new object; the pod clears the ship, and the player's waits to be picked up ([Ejection](ejection.md#the-pod)). |
 | Eject (106) | The ship a pilot has left: destroyed 200 ticks on. |

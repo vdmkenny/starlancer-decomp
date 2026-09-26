@@ -557,7 +557,7 @@ fn missileStep(world: gameobj.World, index: u16, launcher: *Launcher) void {
                 missiles.launchFromTurret(world, index, model, launcher.launcher, launcher.target);
                 launcher.missiles -= 1;
             }
-            launcher.until = now + if (world.player.mission == hurried_mission) hurried_launch_wait else launch_wait;
+            launcher.until = now + if (world.objects.mission_number == hurried_mission) hurried_launch_wait else launch_wait;
         },
         .empty => if (launcher.until < now) {
             launcher.state = .loading;
@@ -997,7 +997,7 @@ test "a missile turret reloads, then tracks and launches" {
         try std.testing.expectEqual(clock.frame_start + 2000, launcher.until);
     }
     try std.testing.expectEqual(5, launcher.missiles);
-    stage.mission.player.mission = 28;
+    stage.mission.objects.mission_number = 28;
     clock.frame_start = launcher.until + 1;
     step(world, stage.ship);
     try std.testing.expectEqual(clock.frame_start + 1000, launcher.until);

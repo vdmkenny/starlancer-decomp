@@ -464,13 +464,14 @@ rounded to the nearest step.
 
 The orders select eight more motion functions, which read the order's state (`0x68C`). OpenReliant
 has the two the [ejection](ejection.md) selects, `motion_brake` (`0x00474610`) and `motion_drift`
-(`0x00474B00`); the rest aren't ported yet
+(`0x00474B00`), and the two the [launches](launch.md) select, `motion_downward` (`0x004744E0`) and
+`motion_plain` (`0x00474570`); the rest aren't ported yet
 ([#30](https://github.com/vdmkenny/openreliant/issues/30)).
 
 | Address | Selected by | What it does |
 |---|---|---|
-| `0x004744E0` | Launch orders, the Ripper | Steers, then moves the velocity through the flight stats' `inertia` toward the throttle times `max_speed`, along the object's Y axis. Models of kind 1 use fixed flight stats (`0x004F9E70`). |
-| `0x00474570` | The Ripper, launch and landing orders | The same along the Z axis, and keeps the throttle as the last update's. A flight model without the throttle rules or the burns. |
+| `0x004744E0` | The Reliant's launch, the Ripper | The plain flight model along the object's Y axis, which points below it: steers, the throttle slowing no turn, then moves the velocity through the flight stats' `inertia` toward the throttle times `max_speed`, the last update's throttle nothing. A fighter (class 1) flies by the first ship type's flight stats, the Predator's (`ship_flight_stats`, `0x004F9E70`), so that every fighter leaves its carrier alike. |
+| `0x00474570` | A torpedo's launch, the Ripper, landing orders | The same along the Z axis, keeping the throttle as the last update's, and the Ripper flies by its own stats whatever its class. A flight model without the throttle rules or the burns. |
 | `0x00474610` | Eject | Slows the velocity to 0.97 of itself each update. |
 | `0x00474640` | Jump Out | Places the object between the two points of the order's state, each coordinate eased by the time since the jump started. No rotation. |
 | `0x004746D0` | Jump In | Flies along the nose at 2400, or 600 for an object without components, less 0.003 of that per unit of time since the jump started, but never slower than the cruise speed. No rotation. |
